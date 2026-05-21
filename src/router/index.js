@@ -24,6 +24,16 @@ const StationMgmtView      = () => import('@/views/StationMgmtView.vue')
 const ServiceTypeView      = () => import('@/views/ServiceTypeView.vue')
 const CarParkView          = () => import('@/views/CarParkView.vue')
 const RemoveCaseView       = () => import('@/views/RemoveCaseView.vue')
+const CaseListView         = () => import('@/views/CaseListView.vue')
+const PaymentRecordsView   = () => import('@/views/PaymentRecordsView.vue')
+const ActionTrackerView2   = () => import('@/views/ActionTrackerView.vue')
+const PrintQueueView       = () => import('@/views/PrintQueueView.vue')
+const QuickCaseSearchView  = () => import('@/views/QuickCaseSearchView.vue')
+const AddNewCaseView       = () => import('@/views/AddNewCaseView.vue')
+const IntelligenceReportView = () => import('@/views/IntelligenceReportView.vue')
+const AddressSearchView    = () => import('@/views/AddressSearchView.vue')
+const CourtBookingView     = () => import('@/views/CourtBookingView.vue')
+const CaseDetailsView      = () => import('@/views/CaseDetailsView.vue')
 const PlaceholderView      = () => import('@/views/PlaceholderView.vue')
 const NotFoundView         = () => import('@/views/NotFoundView.vue')
 const ForbiddenView        = () => import('@/views/ForbiddenView.vue')
@@ -36,11 +46,17 @@ const routes = [
   { path: '/', redirect: '/dashboard' },
 
   // Main
-  { path: '/dashboard',       name: 'dashboard',       component: DashboardView,  meta: { title: 'Dashboard', permission: 'dashboard' } },
-  { path: '/cases',           name: 'cases',           component: PlaceholderView, meta: { title: 'Case List', permission: 'cases' } },
-  { path: '/payment-records', name: 'payment-records', component: PlaceholderView, meta: { title: 'Payment Records', permission: 'cases' } },
-  { path: '/action-tracker',  name: 'action-tracker',  component: PlaceholderView, meta: { title: 'Action Tracker', permission: 'cases' } },
-  { path: '/print-queue',     name: 'print-queue',     component: PlaceholderView, meta: { title: 'Print Queue', permission: 'cases' } },
+  { path: '/dashboard',          name: 'dashboard',          component: DashboardView,        meta: { title: 'Dashboard', permission: 'dashboard' } },
+  { path: '/cases',              name: 'cases',              component: CaseListView,          meta: { title: 'Case List', permission: 'cases' } },
+  { path: '/cases/:caseid',      name: 'case-details',       component: CaseDetailsView,       meta: { title: 'Case Details', permission: 'cases' } },
+  { path: '/payment-records',    name: 'payment-records',    component: PaymentRecordsView,    meta: { title: 'Payment Records', permission: 'cases' } },
+  { path: '/action-tracker',     name: 'action-tracker',     component: ActionTrackerView2,    meta: { title: 'Action Tracker', permission: 'cases' } },
+  { path: '/print-queue',        name: 'print-queue',        component: PrintQueueView,        meta: { title: 'Print Queue', permission: 'cases' } },
+  { path: '/quick-case-search',  name: 'quick-case-search',  component: QuickCaseSearchView,   meta: { title: 'Quick Case Search', permission: 'cases' } },
+  { path: '/add-new-case',       name: 'add-new-case',       component: AddNewCaseView,        meta: { title: 'Add New Case', permission: 'cases' } },
+  { path: '/intelligence-report',name: 'intelligence-report',component: IntelligenceReportView,meta: { title: 'Intelligence Report', permission: 'cases' } },
+  { path: '/address-search',     name: 'address-search',     component: AddressSearchView,     meta: { title: 'Perform Address Search', permission: 'cases' } },
+  { path: '/court-booking',      name: 'court-booking',      component: CourtBookingView,      meta: { title: 'Court Booking', permission: 'cases' } },
 
   // Revenue Protection Admin
   { path: '/admin/action-template',      name: 'action-template',      component: ActionTemplateView,  meta: { title: 'Action Template', parent: adminParent, permission: 'admin' } },

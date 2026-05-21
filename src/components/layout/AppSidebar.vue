@@ -92,15 +92,15 @@ const navSections = [
     label: 'REVENUE PROTECTION',
     items: [
       { name: 'rp-dashboard',    label: 'Dashboard',              to: '/dashboard' },
-      { name: 'quick-search',    label: 'Quick Case Search',      to: '/dashboard' },
-      { name: 'add-case',        label: 'Add New Case',           to: '/dashboard' },
+      { name: 'quick-case-search', label: 'Quick Case Search',      to: '/quick-case-search' },
+      { name: 'add-new-case',    label: 'Add New Case',           to: '/add-new-case' },
       { name: 'cases',           label: 'Case List',              to: '/cases' },
-      { name: 'intel-report',    label: 'Intelligence Report',    to: '/dashboard' },
+      { name: 'intelligence-report', label: 'Intelligence Report', to: '/intelligence-report' },
       { name: 'payment-records', label: 'Payment Records',        to: '/payment-records' },
       { name: 'action-tracker',  label: 'Action Tracker',         to: '/action-tracker' },
       { name: 'print-queue',     label: 'Print Queue',            to: '/print-queue' },
-      { name: 'address-search',  label: 'Perform Address Search', to: '/dashboard' },
-      { name: 'court-booking',   label: 'Court Booking',          to: '/dashboard' },
+      { name: 'address-search',  label: 'Perform Address Search', to: '/address-search' },
+      { name: 'court-booking',   label: 'Court Booking',          to: '/court-booking' },
       {
         name: 'rpAdmin', label: 'Revenue Protection Admin',
         children: [
