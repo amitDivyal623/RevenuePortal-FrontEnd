@@ -88,9 +88,10 @@ const userOpen = ref(false)
 const searchQuery = ref('')
 const userMenuRef = ref(null)
 
-function logout() {
-  auth.logout()
-  router.push({ name: 'login' })
+async function logout() {
+  userOpen.value = false
+  await auth.logout()
+  router.replace({ name: 'login' })
 }
 
 function handleClickOutside(e) {

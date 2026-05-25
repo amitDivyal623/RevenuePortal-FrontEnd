@@ -1,169 +1,115 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { generateCSRFToken } from '@/utils/security.js'
-import { authApi, configureApi } from '@/services/api.js'
+import { decodeJwt } from '@/utils/jwt.js'
+import { apiGet, apiPost, apiPostPublic, ApiError } from '@/services/api.js'
 
-const ACCESS_KEY  = 'rp_access_token'
-const REFRESH_KEY = 'rp_refresh_token'
-const USER_KEY    = 'rp_user'
-
-const SESSION_DURATION = 30 * 60 * 1000  // 30 min inactivity timeout
-
-// ── JWT helpers ───────────────────────────────────────────────────────────────
-
-function decodePayload(token) {
-  try {
-    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')
-    return JSON.parse(atob(b64))
-  } catch { return null }
-}
-
-function tokenIsValid(token) {
-  if (!token) return false
-  const p = decodePayload(token)
-  return !!p && p.exp * 1000 > Date.now()
-}
-
-function buildUserProfile(accessToken) {
-  const p = decodePayload(accessToken)
-  if (!p) return null
-  return {
-    user_id:  p.user_id,
-    toc_id:   p.toc_id,
-    // Backend does not embed name/email in JWT — populated after first /me call
-    // For now derive initials from user_id so the topbar has something to show
-    name:     p.name     || p.user_id || 'Agent',
-    email:    p.email    || '',
-    role:     p.role     || '',
-    initials: p.initials || (p.user_id || 'A').slice(0, 2).toUpperCase(),
-    permissions: p.permissions || ['dashboard', 'cases', 'admin', 'reports'],
-  }
-}
-
-// ── Store ─────────────────────────────────────────────────────────────────────
+const REFRESH_KEY = 'revp.refresh'
+const DEFAULT_TOC_ID = import.meta.env.VITE_DEFAULT_TOC_ID || ''
+const IDLE_TIMEOUT_MS = 30 * 60 * 1000
 
 export const useAuthStore = defineStore('auth', () => {
+  const accessToken  = ref(null)
+  const refreshToken = ref(localStorage.getItem(REFRESH_KEY))
+  const user         = ref(null)
+  const tocId        = ref(null)
+  const ready        = ref(false)
+  let idleTimer = null
 
-  // Restore persisted state
-  const _storedAccess  = localStorage.getItem(ACCESS_KEY)  || ''
-  const _storedRefresh = localStorage.getItem(REFRESH_KEY) || ''
-  const _storedUser    = (() => {
-    try { return JSON.parse(localStorage.getItem(USER_KEY) || 'null') } catch { return null }
-  })()
+  const isAuthenticated = computed(() => !!accessToken.value || !!refreshToken.value)
 
-  const _sessionValid = !!_storedUser && !!_storedRefresh
-
-  // ── Reactive state ────────────────────────────────────────────────────────
-  const accessToken    = ref(_sessionValid && tokenIsValid(_storedAccess) ? _storedAccess : '')
-  const refreshToken   = ref(_sessionValid ? _storedRefresh : '')
-  const user           = ref(_sessionValid ? _storedUser : null)
-  const csrfToken      = ref(generateCSRFToken())
-  const sessionTimeout = ref(null)
-
-  if (!_sessionValid) {
-    localStorage.removeItem(ACCESS_KEY)
-    localStorage.removeItem(REFRESH_KEY)
-    localStorage.removeItem(USER_KEY)
+  function persistRefresh(token) {
+    refreshToken.value = token
+    if (token) localStorage.setItem(REFRESH_KEY, token)
+    else localStorage.removeItem(REFRESH_KEY)
   }
 
-  // ── Computed ──────────────────────────────────────────────────────────────
-  const isAuthenticated = computed(() => !!user.value)
-  const tocId           = computed(() => user.value?.toc_id ?? '')
+  function applyTokens({ access, refresh }) {
+    accessToken.value = access || null
+    if (refresh !== undefined) persistRefresh(refresh || null)
+    const claims = decodeJwt(access)
+    if (claims?.toc_id) tocId.value = claims.toc_id
+  }
 
-  // ── Session timer ─────────────────────────────────────────────────────────
   function resetSessionTimer() {
-    clearTimeout(sessionTimeout.value)
-    sessionTimeout.value = setTimeout(logout, SESSION_DURATION)
-  }
-
-  // ── Token accessors used by configureApi ──────────────────────────────────
-  function getAccessToken()  { return accessToken.value }
-  function getRefreshToken() { return refreshToken.value }
-
-  function _setTokens(access, refresh) {
-    accessToken.value  = access
-    refreshToken.value = refresh || refreshToken.value
-    localStorage.setItem(ACCESS_KEY,  access)
-    if (refresh) localStorage.setItem(REFRESH_KEY, refresh)
-  }
-
-  function _setUser(profile) {
-    user.value = profile
-    localStorage.setItem(USER_KEY, JSON.stringify(profile))
-  }
-
-  // Wire up the API module so it can call refresh transparently
-  configureApi({
-    getAccessToken,
-    getRefreshToken,
-    onTokenRefreshed(newAccess, newRefresh) {
-      _setTokens(newAccess, newRefresh)
-    },
-    onAuthFailure() {
-      _clearSession()
-      // Redirect to login — import router lazily to avoid circular dep
-      import('@/router/index.js').then(({ default: router }) => {
-        router.push({ name: 'login' })
-      })
-    },
-  })
-
-  // ── Login ─────────────────────────────────────────────────────────────────
-  async function login({ username, password, toc_id }) {
-    const data = await authApi.login(username, password, toc_id)
-    // data = { access, refresh }
-    _setTokens(data.access, data.refresh)
-    const profile = buildUserProfile(data.access)
-    profile.name     = username
-    profile.initials = username.slice(0, 2).toUpperCase()
-    _setUser(profile)
-    csrfToken.value = generateCSRFToken()
-    resetSessionTimer()
-    return { success: true }
-  }
-
-  // ── Logout ────────────────────────────────────────────────────────────────
-  async function logout() {
-    const access  = accessToken.value
-    const refresh = refreshToken.value
-    _clearSession()
-
-    if (refresh && access) {
-      // Best-effort — do not await; session is already cleared locally
-      authApi.logout(refresh, access).catch(() => {})
+    if (idleTimer) clearTimeout(idleTimer)
+    if (isAuthenticated.value) {
+      idleTimer = setTimeout(() => { logout() }, IDLE_TIMEOUT_MS)
     }
   }
 
-  function _clearSession() {
-    user.value         = null
-    accessToken.value  = ''
-    refreshToken.value = ''
-    csrfToken.value    = generateCSRFToken()
-    clearTimeout(sessionTimeout.value)
-    localStorage.removeItem(ACCESS_KEY)
-    localStorage.removeItem(REFRESH_KEY)
-    localStorage.removeItem(USER_KEY)
+  async function login({ username, password, toc_id }) {
+    const tocToSend = (toc_id || DEFAULT_TOC_ID || '').trim()
+    if (!tocToSend) {
+      throw new ApiError({ status: 400, data: { toc_id: 'missing — set VITE_DEFAULT_TOC_ID in .env' } })
+    }
+    const tokens = await apiPostPublic('/auth/login/', {
+      username,
+      password,
+      toc_id: tocToSend,
+    })
+    applyTokens(tokens)
+    await fetchProfile()
+    resetSessionTimer()
   }
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
-  function getAuthHeaders() {
-    return accessToken.value ? { Authorization: `Bearer ${accessToken.value}` } : {}
+  async function refresh() {
+    if (!refreshToken.value) {
+      throw new ApiError({ status: 401, data: { detail: 'No refresh token.' } })
+    }
+    const tokens = await apiPostPublic('/auth/refresh/', { refresh: refreshToken.value })
+    applyTokens(tokens)
   }
 
-  function hasPermission(permission) {
-    return user.value?.permissions?.includes(permission) ?? false
+  async function logout({ skipServer = false } = {}) {
+    const rt = refreshToken.value
+    if (!skipServer && rt && accessToken.value) {
+      try { await apiPost('/auth/logout/', { refresh: rt }) } catch { /* clear locally regardless */ }
+    }
+    accessToken.value = null
+    user.value = null
+    tocId.value = null
+    persistRefresh(null)
+    if (idleTimer) { clearTimeout(idleTimer); idleTimer = null }
+  }
+
+  async function fetchProfile() {
+    const claims = decodeJwt(accessToken.value)
+    if (!claims?.user_id) return
+    try {
+      const data = await apiGet(`/auth/users/${claims.user_id}/`)
+      user.value = {
+        user_id: data.user_id,
+        username: data.username,
+        first_name: data.first_name,
+        surname: data.surname,
+        email_address: data.email_address,
+        roles: data.roles || [],
+        initials: ((data.first_name?.[0] || '') + (data.surname?.[0] || '')).toUpperCase(),
+      }
+    } catch (err) {
+      console.warn('fetchProfile failed', err)
+    }
+  }
+
+  async function hydrate() {
+    if (refreshToken.value) {
+      try {
+        await refresh()
+        await fetchProfile()
+        resetSessionTimer()
+      } catch {
+        await logout({ skipServer: true })
+      }
+    }
+    ready.value = true
+  }
+
+  function hasPermission(_permission) {
+    return isAuthenticated.value
   }
 
   return {
-    user,
-    accessToken,
-    csrfToken,
-    isAuthenticated,
-    tocId,
-    getAuthHeaders,
-    login,
-    logout,
-    hasPermission,
-    resetSessionTimer,
+    accessToken, refreshToken, user, tocId, ready, isAuthenticated,
+    login, refresh, logout, fetchProfile, hydrate, resetSessionTimer, hasPermission,
   }
 })

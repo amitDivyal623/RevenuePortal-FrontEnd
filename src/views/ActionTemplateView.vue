@@ -316,7 +316,7 @@ const deletePending   = ref(false)
 async function fetchActionTemplates() {
   actionsLoading.value = true
   try {
-    actions.value = await api.get('/api/revp/actions/templates/')
+    actions.value = await api.get('/revp/actions/templates/')
   } catch (err) {
     console.error('Failed to load action templates:', err)
   } finally {
@@ -327,9 +327,9 @@ async function fetchActionTemplates() {
 onMounted(async () => {
   try {
     const [caseTypeData, modalOpts, actionTypeData] = await Promise.all([
-      api.get('/api/revp/cases/types/'),
-      api.get('/api/revp/actions/templates/modal-options/'),
-      api.get('/api/revp/actions/types/'),
+      api.get('/revp/cases/types/'),
+      api.get('/revp/actions/templates/modal-options/'),
+      api.get('/revp/actions/types/'),
     ])
     caseTypes.value = caseTypeData
     holderOwnerOptions.value = modalOpts.holder_owner_options
@@ -398,7 +398,7 @@ async function fetchPredecessors(caseTypeId) {
     return
   }
   try {
-    const data = await api.get(`/api/revp/actions/templates/?case_type_id=${encodeURIComponent(caseTypeId)}`)
+    const data = await api.get(`/revp/actions/templates/?case_type_id=${encodeURIComponent(caseTypeId)}`)
     // Exclude the template currently being edited so it can't be its own predecessor
     predecessorOptions.value = data.filter(t => t.action_template_id !== form.action_template_id)
   } catch (err) {
@@ -416,8 +416,8 @@ async function fetchTemplatesForCaseType(caseTypeId) {
   try {
     const id = encodeURIComponent(caseTypeId)
     const [emailData, letterData] = await Promise.all([
-      api.get(`/api/revp/templates/emails/?case_type_id=${id}&active=true&page_size=100`),
-      api.get(`/api/revp/templates/letters/?case_type_id=${id}&page_size=100`),
+      api.get(`/revp/templates/emails/?case_type_id=${id}&active=true&page_size=100`),
+      api.get(`/revp/templates/letters/?case_type_id=${id}&page_size=100`),
     ])
     emailTemplates.value  = emailData.results
     letterTemplates.value = letterData.results
@@ -582,7 +582,7 @@ async function confirmDelete() {
   if (!id) return
   deletePending.value = true
   try {
-    await api.delete(`/api/revp/actions/templates/${encodeURIComponent(id)}/delete/`)
+    await api.delete(`/revp/actions/templates/${encodeURIComponent(id)}/delete/`)
     deleteOpen.value = false
     deleteTarget.value = null
     await fetchActionTemplates()
@@ -663,14 +663,14 @@ async function saveAction() {
 
   try {
     if (modalMode.value === 'edit') {
-      await api.put(`/api/revp/actions/templates/${encodeURIComponent(form.action_template_id)}/`, payload)
+      await api.put(`/revp/actions/templates/${encodeURIComponent(form.action_template_id)}/`, payload)
     } else {
-      await api.post('/api/revp/actions/templates/', payload)
+      await api.post('/revp/actions/templates/', payload)
     }
     closeModal()
     await fetchActionTemplates()
   } catch (err) {
-    formError.value = err?.body?.detail || err?.message || 'Save failed. Please try again.'
+    formError.value = err?.data?.detail || err?.message || 'Save failed. Please try again.'
   } finally {
     savePending.value = false
   }

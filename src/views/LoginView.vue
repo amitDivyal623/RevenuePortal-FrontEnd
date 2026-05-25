@@ -10,8 +10,6 @@
       <p class="login-sub">Enter your credentials to continue</p>
 
       <form class="login-form" @submit.prevent="handleSubmit" novalidate autocomplete="off">
-        <input type="hidden" name="_csrf" :value="auth.csrfToken" />
-
         <div class="form-group">
           <label for="username" class="form-label">Username</label>
           <input
@@ -21,7 +19,7 @@
             placeholder="Enter your username"
             autocomplete="username"
             spellcheck="false"
-            maxlength="100"
+            maxlength="45"
             :aria-invalid="!!errors.username"
             @input="clearError('username')"
           />
@@ -36,7 +34,7 @@
             type="password"
             placeholder="Enter your password"
             autocomplete="current-password"
-            maxlength="128"
+            maxlength="255"
             @input="clearError('password')"
           />
           <span v-if="errors.password" class="form-error" role="alert">{{ errors.password }}</span>
@@ -48,10 +46,6 @@
           <span>{{ isLoading ? 'Signing in…' : 'Sign in' }}</span>
         </button>
       </form>
-
-      <div class="demo-hint">
-        Dev credentials: <code>admin</code> / <code>Admin@1234</code>
-      </div>
     </div>
 
     <footer class="login-footer">© 2026 Agent Portal</footer>
@@ -63,76 +57,75 @@ import { ref, reactive } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/store/auth.js'
 import { sanitizeString, checkRateLimit } from '@/utils/security.js'
-import { ApiError } from '@/services/api.js'
 
 const router = useRouter()
-const route  = useRoute()
-const auth   = useAuthStore()
+const route = useRoute()
+const auth = useAuthStore()
 
-// toc_id is injected from the Vite environment variable set per deployment.
-// For local dev this is set to DEV-TOC-001 in .env.
-const TOC_ID = import.meta.env.VITE_DEFAULT_TOC_ID || ''
-
-const form       = reactive({ username: '', password: '' })
-const errors     = reactive({ username: '', password: '' })
+const form = reactive({ username: '', password: '' })
+const errors = reactive({ username: '', password: '' })
 const loginError = ref('')
-const isLoading  = ref(false)
+const isLoading = ref(false)
 
-function clearError(field) {
-  errors[field] = ''
-  loginError.value = ''
-}
+function clearError(field) { errors[field] = ''; loginError.value = '' }
 
 function validate() {
   let valid = true
   if (!form.username.trim()) { errors.username = 'Username is required'; valid = false }
-  if (!form.password)        { errors.password = 'Password is required'; valid = false }
+  if (!form.password) { errors.password = 'Password is required'; valid = false }
   return valid
+}
+
+function showApiError(err) {
+  if (!err) { loginError.value = 'Login failed.'; return }
+
+  if (err.status === 429) {
+    loginError.value = 'Too many attempts. Please wait a minute and try again.'
+    return
+  }
+  if (err.status === 401) {
+    loginError.value = err.data?.detail || 'Invalid username or password.'
+    return
+  }
+  if (err.status === 400 && err.data && typeof err.data === 'object') {
+    const pick = (v) => Array.isArray(v) ? v[0] : v
+    if (err.data.username) errors.username = pick(err.data.username)
+    if (err.data.password) errors.password = pick(err.data.password)
+    if (err.data.toc_id) {
+      loginError.value = `Tenant error: ${pick(err.data.toc_id)}`
+    } else if (err.data.unknown_fields) {
+      loginError.value = 'Bad request.'
+    } else if (err.data.detail) {
+      loginError.value = err.data.detail
+    } else if (!errors.username && !errors.password) {
+      loginError.value = 'Validation failed.'
+    }
+    return
+  }
+  loginError.value = err.message || 'Login failed. Please try again.'
 }
 
 async function handleSubmit() {
   if (!validate()) return
-
   if (!checkRateLimit('login', 5, 15 * 60 * 1000)) {
     loginError.value = 'Too many attempts. Please wait 15 minutes.'
     return
   }
-
-  isLoading.value  = true
+  isLoading.value = true
   loginError.value = ''
-
+  errors.username = ''
+  errors.password = ''
   try {
     await auth.login({
       username: sanitizeString(form.username),
       password: form.password,
-      toc_id:   TOC_ID,
     })
-
-    const redirect =
-      typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
-        ? route.query.redirect
-        : '/dashboard'
+    const redirect = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
+      ? route.query.redirect : '/dashboard'
     router.push(redirect)
   } catch (err) {
+    showApiError(err)
     form.password = ''
-    if (err instanceof ApiError) {
-      if (err.status === 429) {
-        loginError.value = 'Too many login attempts. Please try again later.'
-      } else if (err.status === 400) {
-        // Field-level errors from validators.py
-        const fields = err.fieldErrors
-        if (fields.username) errors.username = fields.username
-        if (fields.password) errors.password = fields.password
-        if (fields.toc_id)   loginError.value = `Configuration error: ${fields.toc_id}`
-        if (!fields.username && !fields.password && !fields.toc_id) {
-          loginError.value = err.message
-        }
-      } else {
-        loginError.value = err.message || 'Invalid username or password'
-      }
-    } else {
-      loginError.value = 'Unable to connect to the server. Please try again.'
-    }
   } finally {
     isLoading.value = false
   }
@@ -186,21 +179,5 @@ async function handleSubmit() {
 }
 .login-form { display: flex; flex-direction: column; gap: 16px; }
 .login-submit { padding: 10px; font-size: 13px; margin-top: 4px; }
-.demo-hint {
-  margin-top: 22px; padding: 10px 14px;
-  background: var(--bg-page);
-  border-radius: var(--radius);
-  font-size: 12px; color: var(--text-light);
-  text-align: center;
-}
-.demo-hint code {
-  background: var(--primary-light);
-  color: var(--primary);
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 11px;
-  font-weight: 600;
-  margin: 0 2px;
-}
 .login-footer { margin-top: 20px; font-size: 12px; color: var(--text-light); }
 </style>
