@@ -231,9 +231,9 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import { useAdminCourtsStore } from '@/store/admin-courts.store.js'
 
-const API_BASE = 'http://localhost:8000'
-const TOC_ID   = '7EM3E7A8-1FC4-47F5-A6207F47F44746E7'
+const store = useAdminCourtsStore()
 
 const parentLabel = 'Revenue Protection Admin'
 
@@ -246,8 +246,8 @@ const sortKey = ref('code')
 const sortDir = ref('asc')
 
 // Table data
-const courts = ref([])
-const totalRecords = ref(0)
+const courts       = computed(() => store.courts)
+const totalRecords = computed(() => store.totalRecords)
 
 const totalPages = computed(() => Math.max(1, Math.ceil(totalRecords.value / perPage.value)))
 const rangeStart = computed(() => totalRecords.value === 0 ? 0 : (currentPage.value - 1) * perPage.value + 1)
@@ -262,31 +262,23 @@ const pageNumbers = computed(() => {
   return pages.slice(0, 7)
 })
 
-async function loadCourts() {
-  try {
-    const params = new URLSearchParams({
-      page: String(currentPage.value),
-      page_size: String(perPage.value),
-      order_by: sortKey.value,
-      direction: sortDir.value
-    })
-    if (applied.name) params.set('name', applied.name)
-    if (applied.code) params.set('code', applied.code)
-    if (applied.area) params.set('area', applied.area)
-
-    const res = await fetch(`${API_BASE}/api/v1/courts/?${params}`, {
-      headers: { 'X-TOC-ID': TOC_ID }
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
-    courts.value = Array.isArray(data.results) ? data.results : []
-    totalRecords.value = data.total ?? 0
-  } catch (err) {
-    console.warn('[AdminCourts] Failed to load courts:', err)
-    courts.value = []
-    totalRecords.value = 0
+function buildListParams() {
+  const params = {
+    page: String(currentPage.value),
+    page_size: String(perPage.value),
+    order_by: sortKey.value,
+    direction: sortDir.value,
   }
+  if (applied.name) params.name = applied.name
+  if (applied.code) params.code = applied.code
+  if (applied.area) params.area = applied.area
+  return params
 }
+
+function loadCourts() {
+  store.fetchCourts(buildListParams())
+}
+
 onMounted(loadCourts)
 watch([currentPage, perPage, sortKey, sortDir], loadCourts)
 
@@ -308,9 +300,7 @@ function sort(key) {
 }
 function sortIcon(key) { return sortKey.value === key ? (sortDir.value === 'asc' ? '↑' : '↓') : '' }
 
-// ---------------------------------------------------------------------------
 // Add / Edit modal
-// ---------------------------------------------------------------------------
 const showModal = ref(false)
 const modalMode = ref('add')
 const editingCourtId = ref(null)
@@ -358,11 +348,7 @@ async function openEditModal(courtId) {
   resetForm()
   showModal.value = true
   try {
-    const res = await fetch(`${API_BASE}/api/v1/courts/${courtId}/`, {
-      headers: { 'X-TOC-ID': TOC_ID }
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
+    const data = await store.fetchCourtById(courtId)
     form.name = data.name ?? ''
     form.code = data.code ?? ''
     form.area = data.area ?? ''
@@ -372,25 +358,16 @@ async function openEditModal(courtId) {
     const ca = data.court_address || {}
     const aa = data.admin_address || {}
     Object.assign(form.court_address, {
-      post_code:    ca.post_code    || '',
-      house_name:   ca.house_name   || '',
-      house_no:     ca.house_no     || '',
-      street:       ca.street       || '',
-      locality:     ca.locality     || '',
-      town:         ca.town         || '',
-      country_name: ca.country_name || ''
+      post_code: ca.post_code || '', house_name: ca.house_name || '',
+      house_no: ca.house_no || '', street: ca.street || '',
+      locality: ca.locality || '', town: ca.town || '', country_name: ca.country_name || ''
     })
     Object.assign(form.admin_address, {
-      post_code:    aa.post_code    || '',
-      house_name:   aa.house_name   || '',
-      house_no:     aa.house_no     || '',
-      street:       aa.street       || '',
-      locality:     aa.locality     || '',
-      town:         aa.town         || '',
-      country_name: aa.country_name || ''
+      post_code: aa.post_code || '', house_name: aa.house_name || '',
+      house_no: aa.house_no || '', street: aa.street || '',
+      locality: aa.locality || '', town: aa.town || '', country_name: aa.country_name || ''
     })
   } catch (err) {
-    console.warn('[AdminCourts] Failed to fetch court for edit:', err)
     saveError.value = 'Could not load court — please close and try again.'
   }
 }
@@ -418,33 +395,20 @@ async function saveCourt() {
   saving.value = true
   try {
     const payload = buildPayload()
-    const isEdit = modalMode.value === 'edit' && editingCourtId.value
-    const url = isEdit
-      ? `${API_BASE}/api/v1/courts/${editingCourtId.value}/`
-      : `${API_BASE}/api/v1/courts/`
-    const res = await fetch(url, {
-      method: isEdit ? 'PATCH' : 'POST',
-      headers: {
-        'X-TOC-ID': TOC_ID,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
-    })
-    if (!res.ok) {
-      const body = await res.json().catch(() => null)
-      throw new Error(body ? JSON.stringify(body) : `HTTP ${res.status}`)
+    if (modalMode.value === 'edit' && editingCourtId.value) {
+      await store.updateCourt(editingCourtId.value, payload)
+    } else {
+      await store.createCourt(payload)
     }
     showModal.value = false
-    await loadCourts()
+    loadCourts()
   } catch (err) {
-    console.warn('[AdminCourts] Failed to save court:', err)
-    saveError.value = `Save failed — ${err.message}`
+    saveError.value = `Save failed — ${err?.message || 'Please try again.'}`
   } finally {
     saving.value = false
   }
 }
 
-// ESC closes the modal
 function onEscKey(e) {
   if (e.key === 'Escape' && showModal.value && !saving.value) closeModal()
 }

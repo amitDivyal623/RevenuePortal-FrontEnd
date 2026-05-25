@@ -299,48 +299,26 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import { api } from '@/services/api.js'
-import { communicationAutomationEnabled } from '@/mock/actionTemplateData.js'
+import { useActionTemplateStore } from '@/store/action-template.store.js'
 
-const actionTypes     = ref([])
+const store = useActionTemplateStore()
+
+const communicationAutomationEnabled = true
+
 const emailTemplates  = ref([])
 const letterTemplates = ref([])
-const actions         = ref([])
-
-const caseTypes       = ref([])
-const holderOwnerOptions = ref([])
-const actionsLoading  = ref(false)
 const savePending     = ref(false)
 const deletePending   = ref(false)
 
-async function fetchActionTemplates() {
-  actionsLoading.value = true
-  try {
-    actions.value = await api.get('/revp/actions/templates/')
-  } catch (err) {
-    console.error('Failed to load action templates:', err)
-  } finally {
-    actionsLoading.value = false
-  }
-}
+const actions         = computed(() => store.templates)
+const caseTypes       = computed(() => store.caseTypes)
+const holderOwnerOptions = computed(() => store.holderOwnerOptions)
+const actionTypes     = computed(() => store.actionTypes)
+const actionsLoading  = computed(() => store.loading)
 
 onMounted(async () => {
-  try {
-    const [caseTypeData, modalOpts, actionTypeData] = await Promise.all([
-      api.get('/revp/cases/types/'),
-      api.get('/revp/actions/templates/modal-options/'),
-      api.get('/revp/actions/types/'),
-    ])
-    caseTypes.value = caseTypeData
-    holderOwnerOptions.value = modalOpts.holder_owner_options
-    actionTypes.value = actionTypeData.map(t => ({
-      actionTypeID: t.action_type_id,
-      actionTypeName: t.action_type_name,
-    }))
-  } catch (err) {
-    console.error('Failed to load reference data:', err)
-  }
-  fetchActionTemplates()
+  await store.fetchReferenceData()
+  await store.fetchTemplates()
 })
 
 const filterCaseTypeId = ref('')
@@ -393,18 +371,9 @@ const modalTitle = computed(() =>
 const predecessorOptions = ref([])
 
 async function fetchPredecessors(caseTypeId) {
-  if (!caseTypeId) {
-    predecessorOptions.value = []
-    return
-  }
-  try {
-    const data = await api.get(`/revp/actions/templates/?case_type_id=${encodeURIComponent(caseTypeId)}`)
-    // Exclude the template currently being edited so it can't be its own predecessor
-    predecessorOptions.value = data.filter(t => t.action_template_id !== form.action_template_id)
-  } catch (err) {
-    console.error('Failed to load predecessors:', err)
-    predecessorOptions.value = []
-  }
+  predecessorOptions.value = caseTypeId
+    ? await store.fetchPredecessors(caseTypeId, form.action_template_id)
+    : []
 }
 
 async function fetchTemplatesForCaseType(caseTypeId) {
@@ -414,15 +383,13 @@ async function fetchTemplatesForCaseType(caseTypeId) {
     return
   }
   try {
-    const id = encodeURIComponent(caseTypeId)
     const [emailData, letterData] = await Promise.all([
-      api.get(`/revp/templates/emails/?case_type_id=${id}&active=true&page_size=100`),
-      api.get(`/revp/templates/letters/?case_type_id=${id}&page_size=100`),
+      store.fetchEmailTemplates(caseTypeId),
+      store.fetchLetterTemplates(caseTypeId),
     ])
-    emailTemplates.value  = emailData.results
-    letterTemplates.value = letterData.results
-  } catch (err) {
-    console.error('Failed to load templates for case type:', err)
+    emailTemplates.value  = emailData
+    letterTemplates.value = letterData
+  } catch {
     emailTemplates.value  = []
     letterTemplates.value = []
   }
@@ -582,10 +549,9 @@ async function confirmDelete() {
   if (!id) return
   deletePending.value = true
   try {
-    await api.delete(`/revp/actions/templates/${encodeURIComponent(id)}/delete/`)
+    await store.removeTemplate(id)
     deleteOpen.value = false
     deleteTarget.value = null
-    await fetchActionTemplates()
   } catch (err) {
     console.error('Delete failed:', err)
   } finally {
@@ -663,12 +629,11 @@ async function saveAction() {
 
   try {
     if (modalMode.value === 'edit') {
-      await api.put(`/revp/actions/templates/${encodeURIComponent(form.action_template_id)}/`, payload)
+      await store.updateTemplate(form.action_template_id, payload)
     } else {
-      await api.post('/revp/actions/templates/', payload)
+      await store.createTemplate(payload)
     }
     closeModal()
-    await fetchActionTemplates()
   } catch (err) {
     formError.value = err?.data?.detail || err?.message || 'Save failed. Please try again.'
   } finally {

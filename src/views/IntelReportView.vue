@@ -47,21 +47,24 @@
 </template>
 
 <script setup>
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
-import { intelConfig } from '@/mock/intelReportData.js'
+import { useIntelReportStore } from '@/store/intel-report.store.js'
 
-const config = reactive({ ...intelConfig })
+const store = useIntelReportStore()
+onMounted(() => store.init())
+
+const config = computed(() => store.config)
 const configOpen = ref(false)
 const configForm = reactive({ EmailAddress:'', PreConfermationMessage:'', ConfermationMessage:'' })
 const errors = reactive({})
 
-function openEditConfig(){ Object.assign(configForm, config); configOpen.value=true }
-function saveConfig(){
+function openEditConfig(){ Object.assign(configForm, config.value); configOpen.value=true }
+async function saveConfig(){
   Object.keys(errors).forEach(k=>delete errors[k])
   if(!configForm.EmailAddress || !/^.+@.+\..+$/.test(configForm.EmailAddress)) { errors.EmailAddress='Please enter a valid email'; return }
-  Object.assign(config, configForm)
+  await store.saveConfig({ ...configForm })
   configOpen.value = false
 }
 </script>

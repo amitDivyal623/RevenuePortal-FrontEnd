@@ -78,13 +78,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import ConfirmDelete from '@/components/ConfirmDelete.vue'
-import { carParks as seed, stations } from '@/mock/carParkData.js'
+import { useCarParksStore } from '@/store/car-parks.store.js'
 
-const rows = reactive([...seed])
+const store = useCarParksStore()
+onMounted(() => store.init())
+
+const rows = computed(() => store.carParks)
+const stations = computed(() => store.stations)
 const filterStation = ref('')
 const page = ref(1)
 const modalOpen = ref(false)
@@ -97,9 +101,9 @@ const form = reactive(blank())
 const errors = reactive({})
 
 const modalTitle = computed(() => modalMode.value==='add'?'Add Car Park':modalMode.value==='edit'?'Edit Car Park':'View Car Park')
-const filtered = computed(() => rows.filter(r => !filterStation.value || r.station_id === filterStation.value))
+const filtered = computed(() => rows.value.filter(r => !filterStation.value || r.station_id === filterStation.value))
 
-function stationName(id){ return stations.find(s=>s.Id===id)?.station_name ?? id }
+function stationName(id){ return stations.value.find(s=>s.Id===id)?.station_name ?? id }
 function reset(){ Object.assign(form, blank()); Object.keys(errors).forEach(k=>delete errors[k]) }
 function openAdd(){ reset(); modalMode.value='add'; modalOpen.value=true }
 function load(r){ Object.assign(form, blank(), { ...r }) }
@@ -107,18 +111,17 @@ function openEdit(r){ reset(); load(r); modalMode.value='edit'; modalOpen.value=
 function openView(r){ reset(); load(r); modalMode.value='view'; modalOpen.value=true }
 function closeModal(){ modalOpen.value=false; reset() }
 function openDelete(r){ deleteTarget.value=r; deleteOpen.value=true }
-function confirmDelete(){ const t=rows.find(x=>x.car_park_id===deleteTarget.value?.car_park_id); if(t) t.active=0; deleteOpen.value=false }
-function uuid(){ return 'CP-'+(crypto?.randomUUID?.() ?? Math.random().toString(16).slice(2)).slice(0,8) }
+async function confirmDelete(){ const id=deleteTarget.value?.car_park_id; if(!id) return; await store.removeCarPark(id); deleteOpen.value=false; deleteTarget.value=null }
 function validate(){
   Object.keys(errors).forEach(k=>delete errors[k]); let ok=true
   if(!form.carpark_name) { errors.carpark_name='Please enter car park location'; ok=false }
   if(!form.station_id) { errors.station_id='Please select station'; ok=false }
   return ok
 }
-function saveCp(){
+async function saveCp(){
   if(!validate()) return
-  if(modalMode.value==='add') rows.push({ car_park_id:uuid(), station_id:form.station_id, carpark_name:form.carpark_name, active:form.active })
-  else { const r=rows.find(x=>x.car_park_id===form.car_park_id); if(r) Object.assign(r, { station_id:form.station_id, carpark_name:form.carpark_name, active:form.active }) }
+  if(modalMode.value==='add') await store.createCarPark({ station_id:form.station_id, carpark_name:form.carpark_name, active:form.active })
+  else await store.updateCarPark(form.car_park_id, { station_id:form.station_id, carpark_name:form.carpark_name, active:form.active })
   closeModal()
 }
 </script>

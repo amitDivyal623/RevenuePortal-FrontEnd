@@ -144,13 +144,18 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import ConfirmDelete from '@/components/ConfirmDelete.vue'
-import { letterTemplates as seed, caseTypes, tocUsers } from '@/mock/letterTemplatesData.js'
+import { useLetterTemplatesStore } from '@/store/letter-templates.store.js'
 
-const rows = reactive([...seed])
+const store = useLetterTemplatesStore()
+onMounted(() => store.init())
+
+const rows = computed(() => store.templates)
+const caseTypes = computed(() => store.caseTypes)
+const tocUsers = computed(() => store.tocUsers)
 const filterCaseType = ref('')
 const filterAddedBy = ref('')
 const filterFrom = ref('')
@@ -167,7 +172,7 @@ const form = reactive(blank())
 const errors = reactive({})
 
 const modalTitle = computed(() => modalMode.value==='add'?'Add Letter Template':modalMode.value==='edit'?'Edit Letter Template':'View Letter Template')
-const filtered = computed(() => rows.filter(r =>
+const filtered = computed(() => rows.value.filter(r =>
   (!filterCaseType.value || r.case_type_ids.includes(filterCaseType.value)) &&
   (!filterAddedBy.value || r.CreatedBy === filterAddedBy.value) &&
   (!filterFrom.value || new Date(r.CreatedDT) >= new Date(filterFrom.value)) &&
@@ -176,7 +181,7 @@ const filtered = computed(() => rows.filter(r =>
 const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / perPage.value)))
 const paged = computed(() => filtered.value.slice((page.value-1)*perPage.value, page.value*perPage.value))
 
-function caseTypeLabel(id){ return caseTypes.find(c=>c.case_type_id===id)?.case_option ?? id }
+function caseTypeLabel(id){ return caseTypes.value.find(c=>c.case_type_id===id)?.case_option ?? id }
 function formatBytes(b){ if(!b) return '—'; if(b<1024) return b+' B'; if(b<1048576) return (b/1024).toFixed(1)+' KB'; return (b/1048576).toFixed(1)+' MB' }
 function formatDate(d){ if(!d) return '—'; return new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'2-digit',year:'numeric'}) }
 function norm(v){ v=String(v??'').trim(); if(!v) return '0.00'; if(v.indexOf('.')===-1) return v+'.00'; const [w,f]=v.split('.'); if(f.length===1) return `${w}.${f}0`; if(f.length>2) return parseFloat(v).toFixed(2); return v }
@@ -188,8 +193,7 @@ function openEdit(r){ reset(); load(r); modalMode.value='edit'; modalOpen.value=
 function openView(r){ reset(); load(r); modalMode.value='view'; modalOpen.value=true }
 function closeModal(){ modalOpen.value=false; reset() }
 function openDelete(r){ deleteTarget.value=r; deleteOpen.value=true }
-function confirmDelete(){ const t=rows.find(x=>x.letter_template_id===deleteTarget.value?.letter_template_id); if(t) t.active=0; deleteOpen.value=false }
-function uuid(){ return 'LT-'+(crypto?.randomUUID?.() ?? Math.random().toString(16).slice(2)).slice(0,8) }
+async function confirmDelete(){ const id=deleteTarget.value?.letter_template_id; if(!id) return; await store.removeTemplate(id); deleteOpen.value=false; deleteTarget.value=null }
 function onFile(e){ const f=e.target.files?.[0]; if(f){ form.filename=f.name; form.filesize=f.size; form.filelocation='s3://templates/'+f.name } }
 function validate(){
   Object.keys(errors).forEach(k=>delete errors[k]); let ok=true
@@ -199,13 +203,13 @@ function validate(){
   if(modalMode.value==='add' && !form.filename) { errors.filename='Please upload a file'; ok=false }
   return ok
 }
-function saveTpl(){
+async function saveTpl(){
   if(!validate()) return
   if(modalMode.value==='add'){
-    rows.push({ letter_template_id:uuid(), title:form.title, description:form.description, filename:form.filename, filelocation:form.filelocation, filesize:form.filesize, admincost:form.admincost, pcnNoticeToOwner:form.pcnNoticeToOwner, pcnChargeCertificate:form.pcnChargeCertificate, active:form.disabledFlag?0:1, case_type_ids:[...form.case_type_ids], CreatedDT:new Date().toISOString(), CreatedBy:'USR-001', enteredbyname:'a.ansari' })
+    await store.createTemplate({ title:form.title, description:form.description, filename:form.filename, filelocation:form.filelocation, filesize:form.filesize, admincost:form.admincost, pcnNoticeToOwner:form.pcnNoticeToOwner, pcnChargeCertificate:form.pcnChargeCertificate, active:form.disabledFlag?0:1, case_type_ids:[...form.case_type_ids], CreatedDT:new Date().toISOString(), CreatedBy:'USR-001', enteredbyname:'a.ansari' })
   } else {
-    const r=rows.find(x=>x.letter_template_id===form.letter_template_id)
-    if(r) Object.assign(r, { title:form.title, description:form.description, filename:form.filename||r.filename, filesize:form.filesize||r.filesize, filelocation:form.filelocation||r.filelocation, admincost:form.admincost, pcnNoticeToOwner:form.pcnNoticeToOwner, pcnChargeCertificate:form.pcnChargeCertificate, case_type_ids:[...form.case_type_ids], active:form.disabledFlag?0:1 })
+    const existing = rows.value.find(x=>x.letter_template_id===form.letter_template_id)
+    await store.updateTemplate(form.letter_template_id, { title:form.title, description:form.description, filename:form.filename||(existing?.filename??''), filesize:form.filesize||(existing?.filesize??0), filelocation:form.filelocation||(existing?.filelocation??''), admincost:form.admincost, pcnNoticeToOwner:form.pcnNoticeToOwner, pcnChargeCertificate:form.pcnChargeCertificate, case_type_ids:[...form.case_type_ids], active:form.disabledFlag?0:1 })
   }
   closeModal()
 }

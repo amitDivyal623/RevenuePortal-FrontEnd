@@ -68,13 +68,16 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import ConfirmDelete from '@/components/ConfirmDelete.vue'
-import { prosecutors as seed } from '@/mock/prosecutorData.js'
+import { useProsecutorsStore } from '@/store/prosecutors.store.js'
 
-const rows = reactive([...seed])
+const store = useProsecutorsStore()
+onMounted(() => store.init())
+
+const rows = computed(() => store.prosecutors)
 const modalOpen = ref(false)
 const modalMode = ref('add')
 const deleteOpen = ref(false)
@@ -93,7 +96,7 @@ function openEdit(r){ reset(); load(r); modalMode.value='edit'; modalOpen.value=
 function openView(r){ reset(); load(r); modalMode.value='view'; modalOpen.value=true }
 function closeModal(){ modalOpen.value=false; reset() }
 function openDelete(r){ deleteTarget.value=r; deleteOpen.value=true }
-function confirmDelete(){ const idx=rows.findIndex(x=>x.prosecutor_id===deleteTarget.value?.prosecutor_id); if(idx!==-1) rows.splice(idx,1); deleteOpen.value=false }
+async function confirmDelete(){ const id=deleteTarget.value?.prosecutor_id; if(!id) return; await store.removeProsecutor(id); deleteOpen.value=false; deleteTarget.value=null }
 function uuid(){ return crypto?.randomUUID?.() ?? 'id-'+Math.random().toString(16).slice(2) }
 function onFile(e){ const f=e.target.files?.[0]; if(f){ form.attachment_id='ATT-'+uuid().slice(0,8); form.attachment_filename=f.name } }
 function validate(){
@@ -103,10 +106,10 @@ function validate(){
   if(!form.supplementary_info) { errors.supplementary_info='Please enter supplementary info'; ok=false }
   return ok
 }
-function saveProsecutor(){
+async function saveProsecutor(){
   if(!validate()) return
-  if(modalMode.value==='add') rows.push({ prosecutor_id:uuid(), Name:form.Name, job_title:form.job_title, supplementary_info:form.supplementary_info, attachment_id:form.attachment_id, attachment_filename:form.attachment_filename })
-  else { const r=rows.find(x=>x.prosecutor_id===form.prosecutor_id); if(r) Object.assign(r, { Name:form.Name, job_title:form.job_title, supplementary_info:form.supplementary_info, attachment_id:form.attachment_id, attachment_filename:form.attachment_filename }) }
+  if(modalMode.value==='add') await store.createProsecutor({ Name:form.Name, job_title:form.job_title, supplementary_info:form.supplementary_info, attachment_id:form.attachment_id, attachment_filename:form.attachment_filename })
+  else await store.updateProsecutor(form.prosecutor_id, { Name:form.Name, job_title:form.job_title, supplementary_info:form.supplementary_info, attachment_id:form.attachment_id, attachment_filename:form.attachment_filename })
   closeModal()
 }
 </script>

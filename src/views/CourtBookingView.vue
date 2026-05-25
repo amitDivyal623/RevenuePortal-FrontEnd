@@ -149,40 +149,22 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import { useCourtBookingStore } from '@/store/court-booking.store.js'
 
-const API_BASE = 'http://localhost:8000'
-const TOC_ID   = '7EM3E7A8-1FC4-47F5-A6207F47F44746E7'
-
-const courtNames = ['Barkingside', 'Westminster', 'Hammersmith', 'Croydon', 'Manchester']
-const courts = ref(courtNames.map((name, i) => ({ court_id: `fallback-${i}`, name })))
-
-async function loadCourts() {
-  try {
-    const res = await fetch(`${API_BASE}/api/v1/courts/?page_size=200`, {
-      headers: { 'X-TOC-ID': TOC_ID }
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
-    if (Array.isArray(data.results) && data.results.length) {
-      courts.value = data.results
-    }
-  } catch (err) {
-    console.warn('[CourtBooking] Failed to load courts, using fallback list:', err)
-  }
-}
-onMounted(loadCourts)
+const store = useCourtBookingStore()
 
 const prosecutors = ['Mr John Tester', 'Ms Brock', 'Ms Test Prosecutor', 'Mr A. Smith', 'Ms L. Chen']
+
+const courts       = computed(() => store.courts)
+const bookings     = computed(() => store.bookings)
+const totalRecords = computed(() => store.totalRecords)
+const loading      = computed(() => store.loading)
 
 const filterCourt = ref('')
 const perPage = ref(10)
 const currentPage = ref(1)
 const sortKey = ref('start_dt')
 const sortDir = ref('asc')
-
-const bookings = ref([])
-const totalRecords = ref(0)
-const loading = ref(false)
 
 const totalPages = computed(() => Math.max(1, Math.ceil(totalRecords.value / perPage.value)))
 const rangeStart = computed(() => totalRecords.value === 0 ? 0 : (currentPage.value - 1) * perPage.value + 1)
@@ -197,34 +179,25 @@ const pageNumbers = computed(() => {
   return pages.slice(0, 7)
 })
 
-async function loadBookings() {
-  loading.value = true
-  try {
-    const params = new URLSearchParams({
-      page: String(currentPage.value),
-      page_size: String(perPage.value),
-      order_by: sortKey.value,
-      direction: sortDir.value
-    })
-    if (filterCourt.value) params.set('court_id', filterCourt.value)
-
-    const res = await fetch(`${API_BASE}/api/v1/court-bookings/?${params}`, {
-      headers: { 'X-TOC-ID': TOC_ID }
-    })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const data = await res.json()
-    bookings.value = Array.isArray(data.results) ? data.results : []
-    totalRecords.value = data.total ?? 0
-  } catch (err) {
-    console.warn('[CourtBooking] Failed to load bookings:', err)
-    bookings.value = []
-    totalRecords.value = 0
-  } finally {
-    loading.value = false
+function buildBookingParams() {
+  const params = {
+    page: String(currentPage.value),
+    page_size: String(perPage.value),
+    order_by: sortKey.value,
+    direction: sortDir.value,
   }
+  if (filterCourt.value) params.court_id = filterCourt.value
+  return params
 }
 
-onMounted(loadBookings)
+function loadBookings() {
+  store.fetchBookings(buildBookingParams())
+}
+
+onMounted(() => {
+  store.fetchCourts()
+  loadBookings()
+})
 watch([currentPage, perPage, sortKey, sortDir], loadBookings)
 
 function applyFilter() {

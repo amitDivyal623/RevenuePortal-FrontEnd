@@ -158,29 +158,25 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import ConfirmDelete from '@/components/ConfirmDelete.vue'
-import { useAuthStore } from '@/store/auth.js'
+import { useLookupValuesStore } from '@/store/lookup-values.store.js'
 
-// ── Config ──────────────────────────────────────────────────────────────────
-const LOOKUP_TYPES_API = '/api/revp/lookup/types/'
-const LOOKUP_DATA_API  = '/api/revp/lookup/data/'
-const PAGE_SIZE        = 25
-
-const authStore = useAuthStore()
+const store = useLookupValuesStore()
 
 // ── State ────────────────────────────────────────────────────────────────────
-const lookupTypes = ref([])
-const rows        = ref([])
-const total       = ref(0)
-const page        = ref(1)
+const lookupTypes = computed(() => store.lookupTypes)
+const rows        = computed(() => store.rows)
+const total       = computed(() => store.total)
+const loading     = computed(() => store.loading)
+const apiError    = computed(() => store.error)
+const PAGE_SIZE   = store.pageSize
 
-const loading    = ref(false)
-const apiError   = ref('')
-const modalOpen  = ref(false)
-const modalMode  = ref('add')
-const modalError = ref('')
+const page        = ref(1)
+const filterType  = ref('')
+const modalOpen   = ref(false)
+const modalMode   = ref('add')
+const modalError  = ref('')
 const deleteOpen   = ref(false)
 const deleteTarget = ref(null)
-const filterType   = ref('')
 
 const blank = () => ({ lookup_data_id: '', lookup_type_id: '', value: '', active: true })
 const form   = reactive(blank())
@@ -196,39 +192,15 @@ const modalTitle = computed(() => ({
   view: 'View Lookup Value',
 })[modalMode.value] ?? 'Lookup Value')
 
-// ── API helpers ───────────────────────────────────────────────────────────────
-async function fetchLookupTypes() {
-  try {
-    const res = await fetch(LOOKUP_TYPES_API, { headers: { ...authStore.getAuthHeaders() } })
-    if (!res.ok) return
-    const json = await res.json()
-    lookupTypes.value = json.results ?? []
-  } catch {
-    // non-critical — table filter just won't populate
-  }
+// ── Data loading ──────────────────────────────────────────────────────────────
+function buildParams() {
+  const params = { page: page.value }
+  if (filterType.value) params.type_id = filterType.value
+  return params
 }
 
-async function fetchLookupData() {
-  loading.value = true
-  apiError.value = ''
-  try {
-    const params = new URLSearchParams({ page: page.value, page_size: PAGE_SIZE })
-    if (filterType.value) params.set('type_id', filterType.value)
-
-    const res = await fetch(`${LOOKUP_DATA_API}?${params}`, {
-      headers: { ...authStore.getAuthHeaders() },
-    })
-    if (!res.ok) throw new Error(`Server returned ${res.status}`)
-    const json = await res.json()
-    rows.value  = json.results ?? []
-    total.value = json.total   ?? 0
-  } catch {
-    apiError.value = 'Failed to load lookup values. Please try again.'
-    rows.value  = []
-    total.value = 0
-  } finally {
-    loading.value = false
-  }
+function fetchLookupData() {
+  store.fetchAll(buildParams())
 }
 
 // ── Search / pagination ───────────────────────────────────────────────────────
@@ -295,54 +267,33 @@ async function saveValue() {
   modalError.value = ''
 
   const isAdd = modalMode.value === 'add'
-
   const payload = isAdd
     ? { lookup_type_id: form.lookup_type_id, value: form.value }
     : { value: form.value, active: form.active }
 
-  const url    = isAdd ? LOOKUP_DATA_API : `${LOOKUP_DATA_API}${form.lookup_data_id}/`
-  const method = isAdd ? 'POST' : 'PUT'
-
   try {
-    const res = await fetch(url, {
-      method,
-      headers: { 'Content-Type': 'application/json', ...authStore.getAuthHeaders() },
-      body: JSON.stringify(payload),
-    })
-
-    if (!res.ok) {
-      const json = await res.json().catch(() => ({}))
-      // Surface the first field error or generic detail
-      const firstError = json.value || json.lookup_type_id || json.detail
-        || Object.values(json).flat()[0] || 'Save failed.'
-      modalError.value = String(firstError)
-      return
+    if (isAdd) {
+      await store.createValue(payload)
+    } else {
+      await store.updateValue(form.lookup_data_id, payload)
     }
-
-    await fetchLookupData()
+    fetchLookupData()
     closeModal()
-  } catch {
-    modalError.value = 'Network error. Please try again.'
+  } catch (err) {
+    const data = err?.data
+    const firstError = data?.value || data?.lookup_type_id || data?.detail
+      || (data && Object.values(data).flat()[0]) || err?.message || 'Save failed.'
+    modalError.value = String(firstError)
   }
 }
 
 // ── Delete ────────────────────────────────────────────────────────────────────
 async function confirmDelete() {
-  apiError.value = ''
   try {
-    const res = await fetch(`${LOOKUP_DATA_API}${deleteTarget.value.lookup_data_id}/`, {
-      method: 'DELETE',
-      headers: { ...authStore.getAuthHeaders() },
-    })
-    if (!res.ok) {
-      const json = await res.json().catch(() => ({}))
-      apiError.value = json.detail || 'Delete failed.'
-      deleteOpen.value = false
-      return
-    }
-    await fetchLookupData()
-  } catch {
-    apiError.value = 'Delete failed. Please try again.'
+    await store.removeValue(deleteTarget.value.lookup_data_id)
+    fetchLookupData()
+  } catch (err) {
+    store.error = err?.data?.detail || 'Delete failed. Please try again.'
   } finally {
     deleteOpen.value = false
   }
@@ -350,7 +301,7 @@ async function confirmDelete() {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 onMounted(() => {
-  fetchLookupTypes()
+  store.fetchTypes()
   fetchLookupData()
 })
 </script>

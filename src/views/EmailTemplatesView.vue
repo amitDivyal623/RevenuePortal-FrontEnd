@@ -153,13 +153,21 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import ConfirmDelete from '@/components/ConfirmDelete.vue'
-import { emailTemplates as seed, caseTypes, tocUsers, letterTemplates, tocEmailTemplates, communicationAutomationEnabled } from '@/mock/emailTemplatesData.js'
+import { useEmailTemplatesStore } from '@/store/email-templates.store.js'
 
-const rows = reactive([...seed])
+const store = useEmailTemplatesStore()
+onMounted(() => store.init())
+
+const rows = computed(() => store.templates)
+const caseTypes = computed(() => store.caseTypes)
+const tocUsers = computed(() => store.tocUsers)
+const letterTemplates = computed(() => store.letterTemplates)
+const tocEmailTemplates = computed(() => store.tocEmailTemplates)
+const communicationAutomationEnabled = computed(() => store.communicationAutomationEnabled)
 const filterCaseType = ref('')
 const filterAddedBy = ref('')
 const filterFrom = ref('')
@@ -176,7 +184,7 @@ const form = reactive(blank())
 const errors = reactive({})
 
 const modalTitle = computed(() => modalMode.value==='add'?'Add Email Template':modalMode.value==='edit'?'Edit Email Template':'View Email Template')
-const filtered = computed(() => rows.filter(r =>
+const filtered = computed(() => rows.value.filter(r =>
   (!filterCaseType.value || r.case_type_ids.includes(filterCaseType.value)) &&
   (!filterAddedBy.value || r.CreatedBy === filterAddedBy.value) &&
   (!filterFrom.value || new Date(r.CreatedDT) >= new Date(filterFrom.value)) &&
@@ -185,8 +193,8 @@ const filtered = computed(() => rows.filter(r =>
 const totalPages = computed(() => Math.max(1, Math.ceil(filtered.value.length / perPage.value)))
 const paged = computed(() => filtered.value.slice((page.value-1)*perPage.value, page.value*perPage.value))
 
-function caseTypeLabel(id){ return caseTypes.find(c=>c.case_type_id===id)?.case_option ?? id }
-function tocEmailLabel(id){ return tocEmailTemplates.find(t=>t.tocEmailTemplate_id===id)?.name ?? '—' }
+function caseTypeLabel(id){ return caseTypes.value.find(c=>c.case_type_id===id)?.case_option ?? id }
+function tocEmailLabel(id){ return tocEmailTemplates.value.find(t=>t.tocEmailTemplate_id===id)?.name ?? '—' }
 function formatDate(d){ if(!d) return '—'; return new Date(d).toLocaleDateString('en-GB',{day:'2-digit',month:'2-digit',year:'numeric'}) }
 function norm(v){ v=String(v??'').trim(); if(!v) return '0.00'; if(v.indexOf('.')===-1) return v+'.00'; const [w,f]=v.split('.'); if(f.length===1) return `${w}.${f}0`; if(f.length>2) return parseFloat(v).toFixed(2); return v }
 function clearFilters(){ filterCaseType.value=''; filterAddedBy.value=''; filterFrom.value=''; filterTo.value=''; page.value=1 }
@@ -197,8 +205,7 @@ function openEdit(r){ reset(); load(r); modalMode.value='edit'; modalOpen.value=
 function openView(r){ reset(); load(r); modalMode.value='view'; modalOpen.value=true }
 function closeModal(){ modalOpen.value=false; reset() }
 function openDelete(r){ deleteTarget.value=r; deleteOpen.value=true }
-function confirmDelete(){ const t=rows.find(x=>x.email_template_id===deleteTarget.value?.email_template_id); if(t) t.active=0; deleteOpen.value=false }
-function uuid(){ return 'EM-'+(crypto?.randomUUID?.() ?? Math.random().toString(16).slice(2)).slice(0,8) }
+async function confirmDelete(){ const id=deleteTarget.value?.email_template_id; if(!id) return; await store.removeTemplate(id); deleteOpen.value=false; deleteTarget.value=null }
 function validate(){
   Object.keys(errors).forEach(k=>delete errors[k]); let ok=true
   if(!form.title) { errors.title='Please enter title'; ok=false }
@@ -206,13 +213,12 @@ function validate(){
   if(form.case_type_ids.length===0) { errors.case_type_ids='Please select at least one case type'; ok=false }
   return ok
 }
-function saveTpl(){
+async function saveTpl(){
   if(!validate()) return
   if(modalMode.value==='add'){
-    rows.push({ email_template_id:uuid(), tocEmailTemplate_id:form.tocEmailTemplate_id, title:form.title, description:form.description, adminCost:form.adminCost, pcnNoticeToOwner:form.pcnNoticeToOwner, pcnChargeCertificate:form.pcnChargeCertificate, active:1, letter_template_id:form.letter_template_id, case_type_ids:[...form.case_type_ids], CreatedDT:new Date().toISOString(), CreatedBy:'USR-001', enteredbyname:'a.ansari' })
+    await store.createTemplate({ tocEmailTemplate_id:form.tocEmailTemplate_id, title:form.title, description:form.description, adminCost:form.adminCost, pcnNoticeToOwner:form.pcnNoticeToOwner, pcnChargeCertificate:form.pcnChargeCertificate, active:1, letter_template_id:form.letter_template_id, case_type_ids:[...form.case_type_ids], CreatedDT:new Date().toISOString(), CreatedBy:'USR-001', enteredbyname:'a.ansari' })
   } else {
-    const r=rows.find(x=>x.email_template_id===form.email_template_id)
-    if(r) Object.assign(r, { tocEmailTemplate_id:form.tocEmailTemplate_id, title:form.title, description:form.description, adminCost:form.adminCost, pcnNoticeToOwner:form.pcnNoticeToOwner, pcnChargeCertificate:form.pcnChargeCertificate, letter_template_id:form.letter_template_id, case_type_ids:[...form.case_type_ids], active:form.disabledFlag?0:1 })
+    await store.updateTemplate(form.email_template_id, { tocEmailTemplate_id:form.tocEmailTemplate_id, title:form.title, description:form.description, adminCost:form.adminCost, pcnNoticeToOwner:form.pcnNoticeToOwner, pcnChargeCertificate:form.pcnChargeCertificate, letter_template_id:form.letter_template_id, case_type_ids:[...form.case_type_ids], active:form.disabledFlag?0:1 })
   }
   closeModal()
 }

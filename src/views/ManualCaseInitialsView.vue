@@ -77,13 +77,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import ConfirmDelete from '@/components/ConfirmDelete.vue'
-import { initials as seed, caseTypes } from '@/mock/manualCaseInitialsData.js'
+import { useManualCaseInitialsStore } from '@/store/manual-case-initials.store.js'
 
-const rows = reactive([...seed])
+const store = useManualCaseInitialsStore()
+onMounted(() => store.init())
+
+const rows = computed(() => store.initials)
+const caseTypes = computed(() => store.caseTypes)
 const filterInitials = ref('')
 const page = ref(1)
 const modalOpen = ref(false)
@@ -96,9 +100,9 @@ const form = reactive(blank())
 const errors = reactive({})
 
 const modalTitle = computed(() => modalMode.value==='add'?'Add Case Initial':modalMode.value==='edit'?'Edit Case Initial':'View Case Initial')
-const filtered = computed(() => rows.filter(r => !filterInitials.value || r.case_initials.toLowerCase().includes(filterInitials.value.toLowerCase())))
+const filtered = computed(() => rows.value.filter(r => !filterInitials.value || r.case_initials.toLowerCase().includes(filterInitials.value.toLowerCase())))
 
-function caseTypeLabel(id){ return caseTypes.find(c=>c.case_type_id===id)?.case_option ?? id }
+function caseTypeLabel(id){ return caseTypes.value.find(c=>c.case_type_id===id)?.case_option ?? id }
 function reset(){ Object.assign(form, blank()); Object.keys(errors).forEach(k=>delete errors[k]) }
 function openAdd(){ reset(); modalMode.value='add'; modalOpen.value=true }
 function load(r){ Object.assign(form, blank(), { case_initials_id:r.case_initials_id, case_initials:r.case_initials, case_type_ids:[...r.case_type_ids], active:r.active }) }
@@ -106,18 +110,17 @@ function openEdit(r){ reset(); load(r); modalMode.value='edit'; modalOpen.value=
 function openView(r){ reset(); load(r); modalMode.value='view'; modalOpen.value=true }
 function closeModal(){ modalOpen.value=false; reset() }
 function openDelete(r){ deleteTarget.value=r; deleteOpen.value=true }
-function confirmDelete(){ const id=deleteTarget.value?.case_initials_id; const t=rows.find(x=>x.case_initials_id===id); if(t) t.active=0; deleteOpen.value=false }
-function uuid(){ return crypto?.randomUUID?.() ?? 'id-'+Math.random().toString(16).slice(2) }
+async function confirmDelete(){ const id=deleteTarget.value?.case_initials_id; if(!id) return; await store.removeInitial(id); deleteOpen.value=false; deleteTarget.value=null }
 function validate(){
   Object.keys(errors).forEach(k=>delete errors[k]); let ok=true
   if(!form.case_initials) { errors.case_initials='Please enter Case Initial'; ok=false }
   if(form.case_type_ids.length===0) { errors.case_type_ids='Please select at least one case type'; ok=false }
   return ok
 }
-function saveInitial(){
+async function saveInitial(){
   if(!validate()) return
-  if(modalMode.value==='add') rows.push({ case_initials_id:uuid(), case_initials:form.case_initials, case_type_ids:[...form.case_type_ids], active:1 })
-  else { const r=rows.find(x=>x.case_initials_id===form.case_initials_id); if(r) Object.assign(r, { case_initials:form.case_initials, case_type_ids:[...form.case_type_ids] }) }
+  if(modalMode.value==='add') await store.createInitial({ case_initials:form.case_initials, case_type_ids:[...form.case_type_ids], active:1 })
+  else await store.updateInitial(form.case_initials_id, { case_initials:form.case_initials, case_type_ids:[...form.case_type_ids] })
   closeModal()
 }
 </script>

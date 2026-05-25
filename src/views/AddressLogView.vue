@@ -63,18 +63,22 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import { addressLogs as seed, tocUsers } from '@/mock/addressLogData.js'
+import { useAddressLogStore } from '@/store/address-log.store.js'
 
-const rows = reactive([...seed])
+const store = useAddressLogStore()
+onMounted(() => store.init())
+
+const rows = computed(() => store.logs)
+const tocUsers = computed(() => store.users)
 const filterUser = ref('')
 const filterFrom = ref('')
 const filterTo = ref('')
 const page = ref(1)
 const perPage = ref(10)
 
-const filtered = computed(() => rows.filter(r => {
+const filtered = computed(() => rows.value.filter(r => {
   if (filterUser.value && r.userid !== filterUser.value) return false
   if (filterFrom.value && new Date(r.CreatedDT) < new Date(filterFrom.value)) return false
   if (filterTo.value && new Date(r.CreatedDT) > new Date(filterTo.value + 'T23:59:59')) return false

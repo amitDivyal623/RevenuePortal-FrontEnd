@@ -86,13 +86,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import ConfirmDelete from '@/components/ConfirmDelete.vue'
-import { printTemplates as seed, caseTypes } from '@/mock/printTemplatesData.js'
+import { usePrintTemplatesStore } from '@/store/print-templates.store.js'
 
-const rows = reactive([...seed])
+const store = usePrintTemplatesStore()
+onMounted(() => store.init())
+
+const rows = computed(() => store.templates)
+const caseTypes = computed(() => store.caseTypes)
 const filterCaseType = ref('')
 const page = ref(1)
 const modalOpen = ref(false)
@@ -105,9 +109,9 @@ const form = reactive(blank())
 const errors = reactive({})
 
 const modalTitle = computed(() => modalMode.value==='add'?'Add Print Template':modalMode.value==='edit'?'Edit Print Template':'View Print Template')
-const filtered = computed(() => rows.filter(r => !filterCaseType.value || r.case_type_id === filterCaseType.value))
+const filtered = computed(() => rows.value.filter(r => !filterCaseType.value || r.case_type_id === filterCaseType.value))
 
-function caseTypeLabel(id){ return caseTypes.find(c=>c.case_type_id===id)?.case_option ?? id }
+function caseTypeLabel(id){ return caseTypes.value.find(c=>c.case_type_id===id)?.case_option ?? id }
 function reset(){ Object.assign(form, blank()); Object.keys(errors).forEach(k=>delete errors[k]) }
 function openAdd(){ reset(); modalMode.value='add'; modalOpen.value=true }
 function load(r){ Object.assign(form, blank(), { ...r }) }
@@ -115,8 +119,7 @@ function openEdit(r){ reset(); load(r); modalMode.value='edit'; modalOpen.value=
 function openView(r){ reset(); load(r); modalMode.value='view'; modalOpen.value=true }
 function closeModal(){ modalOpen.value=false; reset() }
 function openDelete(r){ deleteTarget.value=r; deleteOpen.value=true }
-function confirmDelete(){ const t=rows.find(x=>x.print_template_id===deleteTarget.value?.print_template_id); if(t) t.active=0; deleteOpen.value=false }
-function uuid(){ return 'PT-'+(crypto?.randomUUID?.() ?? Math.random().toString(16).slice(2)).slice(0,8) }
+async function confirmDelete(){ const id=deleteTarget.value?.print_template_id; if(!id) return; await store.removeTemplate(id); deleteOpen.value=false; deleteTarget.value=null }
 function validate(){
   Object.keys(errors).forEach(k=>delete errors[k]); let ok=true
   if(!form.title) { errors.title='Please enter title'; ok=false }
@@ -124,10 +127,10 @@ function validate(){
   if(!form.contents) { errors.contents='Please enter contents'; ok=false }
   return ok
 }
-function saveTpl(){
+async function saveTpl(){
   if(!validate()) return
-  if(modalMode.value==='add') rows.push({ print_template_id:uuid(), ...form })
-  else { const r=rows.find(x=>x.print_template_id===form.print_template_id); if(r) Object.assign(r, { title:form.title, contents:form.contents, case_type_id:form.case_type_id, active:form.active }) }
+  if(modalMode.value==='add') await store.createTemplate({ title:form.title, contents:form.contents, case_type_id:form.case_type_id, active:form.active })
+  else await store.updateTemplate(form.print_template_id, { title:form.title, contents:form.contents, case_type_id:form.case_type_id, active:form.active })
   closeModal()
 }
 </script>

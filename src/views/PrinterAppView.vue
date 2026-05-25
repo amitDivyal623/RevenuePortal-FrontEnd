@@ -64,18 +64,22 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
-import { printerAppRows as seed, caseTypes } from '@/mock/appControlData.js'
+import { useAppControlStore } from '@/store/app-control.store.js'
 
-const rows = reactive([...seed])
+const store = useAppControlStore()
+onMounted(() => store.init())
+
+const rows = computed(() => store.printerAppRows)
+const caseTypes = computed(() => store.caseTypes)
 const filterCaseType = ref('')
 const modalOpen = ref(false)
 const form = reactive({ ID:'', case_type_id:'', case_option:'', description:'', enabled:0 })
 
-const filtered = computed(() => rows.filter(r => !filterCaseType.value || r.case_type_id === filterCaseType.value))
+const filtered = computed(() => rows.value.filter(r => !filterCaseType.value || r.case_type_id === filterCaseType.value))
 
 function openEdit(r){ Object.assign(form, r); modalOpen.value=true }
-function save(){ const r=rows.find(x=>x.ID===form.ID); if(r) Object.assign(r, { enabled:form.enabled }); modalOpen.value=false }
+async function save(){ await store.savePrinterAppRow(form.case_type_id, { enabled:form.enabled }); modalOpen.value=false }
 </script>

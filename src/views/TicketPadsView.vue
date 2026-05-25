@@ -277,22 +277,18 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import {
-  caseTypes,
-  tocUsers,
-  padIssuers,
-  sessionUserId,
-  ticketPads as seedPads
-} from '@/mock/ticketPadsData.js'
+import { useTicketPadsStore } from '@/store/ticket-pads.store.js'
 
-/* ════════════════════════════════════════════════════════════════════════
-   State — mirrors the data shape returned by the legacy
-   RevpConfig.GetTicketPadsData / GetEditTicketPadsData / SaveTicketPadsData
-   endpoints so future axios integration is a drop-in swap.
-   ════════════════════════════════════════════════════════════════════════ */
-const pads = reactive([...seedPads])
+const store = useTicketPadsStore()
+onMounted(() => store.init())
+
+const pads = computed(() => store.pads)
+const caseTypes = computed(() => store.caseTypes)
+const tocUsers = computed(() => store.tocUsers)
+const padIssuers = computed(() => store.padIssuers)
+const sessionUserId = computed(() => store.sessionUserId)
 
 const filterCaseType  = ref('')
 const filterEnteredBy = ref('')
@@ -319,10 +315,8 @@ const blankForm = () => ({
   issuedDate: '',
   startNum: null,
   endNum: null,
-  // checkbox proxy — `active` field is set from this on save
   disabledFlag: false,
-  // Entered By auto-fills from session user, always disabled (matches legacy)
-  entered_by: sessionUserId
+  entered_by: sessionUserId.value
 })
 
 const form = reactive(blankForm())
@@ -343,7 +337,7 @@ const isFieldDisabled = computed(() =>
 
 /* ───────────── Filtering / sorting / paging ───────────── */
 const filteredPads = computed(() =>
-  pads.filter(p =>
+  pads.value.filter(p =>
     (!filterCaseType.value  || p.case_type_id === filterCaseType.value) &&
     (!filterEnteredBy.value || p.CreatedBy    === filterEnteredBy.value) &&
     (!filterIssuedBy.value  || p.issuedBy     === filterIssuedBy.value) &&
@@ -395,9 +389,9 @@ function formatDateTime(d) {
 }
 
 /* ───────────── Lookup helpers (used on save to denormalise joins) ───────────── */
-function findCaseType(id) { return caseTypes.find(c => c.case_type_id === id) }
-function findIssuer(id)   { return padIssuers.find(i => i.lookup_data_id === id) }
-function findUser(id)     { return tocUsers.find(u => u.UserID === id) }
+function findCaseType(id) { return caseTypes.value.find(c => c.case_type_id === id) }
+function findIssuer(id)   { return padIssuers.value.find(i => i.lookup_data_id === id) }
+function findUser(id)     { return tocUsers.value.find(u => u.UserID === id) }
 
 /* ───────────── Modal handlers ───────────── */
 function resetForm() {
@@ -450,11 +444,10 @@ function openDelete(row) {
   deleteOpen.value = true
 }
 
-function confirmDelete() {
+async function confirmDelete() {
   const id = deleteTarget.value?.ticket_pad_id
   if (!id) return
-  const target = pads.find(p => p.ticket_pad_id === id)
-  if (target) target.active = 0
+  await store.removePad(id)
   deleteOpen.value = false
   deleteTarget.value = null
 }
@@ -500,7 +493,7 @@ function denormalise(payload) {
   }
 }
 
-function saveTicketPad() {
+async function saveTicketPad() {
   if (!validate()) return
 
   const startNum = Number(form.startNum)
@@ -509,7 +502,6 @@ function saveTicketPad() {
 
   if (modalMode.value === 'add') {
     const base = {
-      ticket_pad_id: uuid(),
       case_type_id: form.case_type_id,
       issuedBy: form.issuedBy,
       issuedTo: form.issuedTo,
@@ -520,16 +512,16 @@ function saveTicketPad() {
       Issuedtickets: 0,
       Firstused: null,
       Lastused: null,
-      active: 1,    // legacy: new adds always start active = 1
+      active: 1,
       CreatedBy: form.entered_by,
       CreatedDT: new Date().toISOString()
     }
-    pads.push({ ...base, ...denormalise(base) })
+    await store.createPad({ ...base, ...denormalise(base) })
   } else if (modalMode.value === 'edit') {
-    const row = pads.find(p => p.ticket_pad_id === form.ticket_pad_id)
-    if (row) {
+    const existing = pads.value.find(p => p.ticket_pad_id === form.ticket_pad_id)
+    if (existing) {
       const base = {
-        ...row,
+        ...existing,
         case_type_id: form.case_type_id,
         issuedBy: form.issuedBy,
         issuedTo: form.issuedTo,
@@ -539,7 +531,7 @@ function saveTicketPad() {
         Totaltickets: total,
         active: form.disabledFlag ? 0 : 1
       }
-      Object.assign(row, base, denormalise(base))
+      await store.updatePad(form.ticket_pad_id, { ...base, ...denormalise(base) })
     }
   }
   closeModal()

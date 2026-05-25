@@ -110,13 +110,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import ConfirmDelete from '@/components/ConfirmDelete.vue'
-import { offences as seed, chargeOptions } from '@/mock/offencesData.js'
+import { useOffencesStore } from '@/store/offences.store.js'
 
-const rows = reactive([...seed])
+const store = useOffencesStore()
+onMounted(() => store.init())
+
+const rows = computed(() => store.offences)
+const chargeOptions = computed(() => store.chargeOptions)
 const filterName = ref('')
 const filterCode = ref('')
 const page = ref(1)
@@ -135,7 +139,7 @@ const errors = reactive({})
 
 const modalTitle = computed(() => modalMode.value==='add'?'Add Offence':modalMode.value==='edit'?'Edit Offence':'View Offence')
 
-const filtered = computed(() => rows.filter(r =>
+const filtered = computed(() => rows.value.filter(r =>
   (!filterName.value || r.description.toLowerCase().includes(filterName.value.toLowerCase())) &&
   (!filterCode.value || r.CJS_Code.toLowerCase().includes(filterCode.value.toLowerCase()))
 ))
@@ -157,25 +161,23 @@ function openEdit(r){ reset(); load(r); modalMode.value='edit'; modalOpen.value=
 function openView(r){ reset(); load(r); modalMode.value='view'; modalOpen.value=true }
 function closeModal(){ modalOpen.value=false; reset() }
 function openDelete(r){ deleteTarget.value=r; deleteOpen.value=true }
-function confirmDelete(){ const id=deleteTarget.value?.offence_id; if(!id) return; const t=rows.find(x=>x.offence_id===id); if(t) t.active=0; deleteOpen.value=false; deleteTarget.value=null }
-function uuid(){ return crypto?.randomUUID?.() ?? 'id-'+Math.random().toString(16).slice(2) }
+async function confirmDelete(){ const id=deleteTarget.value?.offence_id; if(!id) return; await store.removeOffence(id); deleteOpen.value=false; deleteTarget.value=null }
 function validate(){
   Object.keys(errors).forEach(k=>delete errors[k]); let ok=true
   if(!form.CJS_Code) { errors.CJS_Code='Please enter CJS Code'; ok=false }
   if(!form.description) { errors.description='Please enter Description'; ok=false }
-  const dup = rows.find(r => r.description.toLowerCase()===form.description.toLowerCase() && r.offence_id!==form.offence_id)
+  const dup = rows.value.find(r => r.description.toLowerCase()===form.description.toLowerCase() && r.offence_id!==form.offence_id)
   if(dup) { errors.description='Description already exists'; ok=false }
   if(!form.charge) { errors.charge='Please select a charge'; ok=false }
   if(!form.offenceStatment) { errors.offenceStatment='Please enter Offence Statement'; ok=false }
   return ok
 }
-function saveOffence(){
+async function saveOffence(){
   if(!validate()) return
   if(modalMode.value==='add'){
-    rows.push({ offence_id:uuid(), CJS_Code:form.CJS_Code, description:form.description, charge:form.charge, offenceStatment:form.offenceStatment, active:1 })
+    await store.createOffence({ CJS_Code:form.CJS_Code, description:form.description, charge:form.charge, offenceStatment:form.offenceStatment })
   } else if(modalMode.value==='edit'){
-    const r = rows.find(x=>x.offence_id===form.offence_id)
-    if(r) Object.assign(r, { CJS_Code:form.CJS_Code, description:form.description, charge:form.charge, offenceStatment:form.offenceStatment, active:form.disabledFlag?0:1 })
+    await store.updateOffence(form.offence_id, { CJS_Code:form.CJS_Code, description:form.description, charge:form.charge, offenceStatment:form.offenceStatment, active:form.disabledFlag?0:1 })
   }
   closeModal()
 }

@@ -89,13 +89,18 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import ConfirmDelete from '@/components/ConfirmDelete.vue'
-import { letterVariables as seed, dataTypes, styleOptions } from '@/mock/letterVariableData.js'
+import { useLetterVariablesStore } from '@/store/letter-variables.store.js'
 
-const rows = reactive([...seed])
+const store = useLetterVariablesStore()
+onMounted(() => store.init())
+
+const rows = computed(() => store.variables)
+const dataTypes = computed(() => store.dataTypes)
+const styleOptions = computed(() => store.styleOptions)
 const filterName = ref('')
 const page = ref(1)
 const modalOpen = ref(false)
@@ -108,7 +113,7 @@ const form = reactive(blank())
 const errors = reactive({})
 
 const modalTitle = computed(() => modalMode.value==='add'?'Add Variable':modalMode.value==='edit'?'Edit Variable':'View Variable')
-const filtered = computed(() => rows.filter(r => !filterName.value || r.variableName.toLowerCase().includes(filterName.value.toLowerCase())))
+const filtered = computed(() => rows.value.filter(r => !filterName.value || r.variableName.toLowerCase().includes(filterName.value.toLowerCase())))
 
 function reset(){ Object.assign(form, blank()); Object.keys(errors).forEach(k=>delete errors[k]) }
 function openAdd(){ reset(); modalMode.value='add'; modalOpen.value=true }
@@ -117,8 +122,7 @@ function openEdit(r){ reset(); load(r); modalMode.value='edit'; modalOpen.value=
 function openView(r){ reset(); load(r); modalMode.value='view'; modalOpen.value=true }
 function closeModal(){ modalOpen.value=false; reset() }
 function openDelete(r){ deleteTarget.value=r; deleteOpen.value=true }
-function confirmDelete(){ const t=rows.find(x=>x.variableID===deleteTarget.value?.variableID); if(t) t.bActive=0; deleteOpen.value=false }
-function uuid(){ return 'LV-'+(crypto?.randomUUID?.() ?? Math.random().toString(16).slice(2)).slice(0,8) }
+async function confirmDelete(){ const id=deleteTarget.value?.variableID; if(!id) return; await store.removeVariable(id); deleteOpen.value=false; deleteTarget.value=null }
 function validate(){
   Object.keys(errors).forEach(k=>delete errors[k]); let ok=true
   if(!form.variableName) { errors.variableName='Please enter name'; ok=false }
@@ -126,11 +130,11 @@ function validate(){
   if(!form.value) { errors.value='Please enter value'; ok=false }
   return ok
 }
-function saveVar(){
+async function saveVar(){
   if(!validate()) return
   form.applicable_styles = form.style_values
-  if(modalMode.value==='add') rows.push({ variableID:uuid(), ...form })
-  else { const r=rows.find(x=>x.variableID===form.variableID); if(r) Object.assign(r, { variableName:form.variableName, variable_data_types:form.variable_data_types, value:form.value, applicable_styles:form.style_values, style_values:form.style_values, bActive:form.bActive }) }
+  if(modalMode.value==='add') await store.createVariable({ variableName:form.variableName, variable_data_types:form.variable_data_types, value:form.value, variableType:form.variableType, applicable_styles:form.style_values, style_values:form.style_values, bActive:form.bActive })
+  else await store.updateVariable(form.variableID, { variableName:form.variableName, variable_data_types:form.variable_data_types, value:form.value, applicable_styles:form.style_values, style_values:form.style_values, bActive:form.bActive })
   closeModal()
 }
 </script>

@@ -296,34 +296,27 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import ConfirmDelete from '@/components/ConfirmDelete.vue'
-import { useAuthStore } from '@/store/auth.js'
+import { useStationsStore } from '@/store/stations.store.js'
 
-// ── Config ─────────────────────────────────────────────────────────────────────
-const STATIONS_API   = '/api/v1/revp/stations'
-const SVC_TYPES_API  = '/api/v1/revp/service-types'
-const CASE_TYPES_API = '/api/v1/revp/case-types'
-const DEFAULT_TOC_ID = '7EM3E7A8-1FC4-47F5-A6207F47F44746E7'
-
-const authStore = useAuthStore()
-function getTocId() { return authStore.user?.toc_id || DEFAULT_TOC_ID }
+const store = useStationsStore()
 
 // ── State ──────────────────────────────────────────────────────────────────────
-const rows     = ref([])
-const total    = ref(0)
+const rows         = computed(() => store.rows)
+const total        = computed(() => store.total)
+const serviceTypes = computed(() => store.serviceTypes)
+const caseTypes    = computed(() => store.caseTypes)
+const loading      = computed(() => store.loading)
+const apiError     = computed(() => store.error)
+
 const page     = ref(1)
 const pageSize = ref(25)
 
-const loading       = ref(false)
 const detailLoading = ref(false)
-const apiError   = ref('')
 const modalOpen  = ref(false)
 const modalMode  = ref('add')
 const modalError = ref('')
 const deleteOpen   = ref(false)
 const deleteTarget = ref(null)
-
-const serviceTypes = ref([])
-const caseTypes    = ref([])
 
 const filterName        = ref('')
 const filterCrs         = ref('')
@@ -370,63 +363,24 @@ function caseTypeCode(id) {
 }
 
 // ── Fetch ──────────────────────────────────────────────────────────────────────
-async function fetchAll() {
-  loading.value = true
-  apiError.value = ''
-  try {
-    const params = new URLSearchParams({
-      toc_id:    getTocId(),
-      page:      page.value,
-      page_size: pageSize.value,
-    })
-    if (filterName.value)        params.set('station_name',   filterName.value)
-    if (filterCrs.value)         params.set('crs_code',       filterCrs.value)
-    if (filterNlc.value)         params.set('nlc_code',       filterNlc.value)
-    if (filterServiceType.value) params.set('service_type_id', filterServiceType.value)
-    if (filterCaseType.value)    params.set('case_type_id',   filterCaseType.value)
-
-    const res = await fetch(`${STATIONS_API}/?${params}`)
-    if (!res.ok) throw new Error(`Server returned ${res.status}`)
-    const json = await res.json()
-    rows.value  = json.results ?? []
-    total.value = json.total   ?? 0
-  } catch {
-    apiError.value = 'Failed to load stations. Please try again.'
-    rows.value  = []
-    total.value = 0
-  } finally {
-    loading.value = false
-  }
+function buildParams() {
+  const params = { page: page.value, page_size: pageSize.value }
+  if (filterName.value)        params.station_name    = filterName.value
+  if (filterCrs.value)         params.crs_code        = filterCrs.value
+  if (filterNlc.value)         params.nlc_code        = filterNlc.value
+  if (filterServiceType.value) params.service_type_id = filterServiceType.value
+  if (filterCaseType.value)    params.case_type_id    = filterCaseType.value
+  return params
 }
 
-async function fetchServiceTypes() {
-  try {
-    const res = await fetch(`${SVC_TYPES_API}/enabled/?toc_id=${getTocId()}`)
-    if (!res.ok) return
-    const json = await res.json()
-    serviceTypes.value = json.results ?? []
-  } catch {
-    console.error('Failed to load service types.')
-  }
-}
-
-async function fetchCaseTypes() {
-  try {
-    const res = await fetch(`${CASE_TYPES_API}/?toc_id=${getTocId()}`)
-    if (!res.ok) return
-    const json = await res.json()
-    caseTypes.value = json.results ?? []
-  } catch {
-    console.error('Failed to load case types.')
-  }
+function fetchAll() {
+  store.fetchAll(buildParams())
 }
 
 async function fetchStationDetail(stationId) {
   detailLoading.value = true
   try {
-    const res = await fetch(`${STATIONS_API}/${stationId}/?toc_id=${getTocId()}`)
-    if (!res.ok) throw new Error(`Server returned ${res.status}`)
-    return await res.json()
+    return await store.fetchById(stationId)
   } catch {
     modalError.value = 'Failed to load station details. Please try again.'
     return null
@@ -542,64 +496,40 @@ async function saveStation() {
     longitude:       form.longitude || null,
     z_ax_cord:       form.z_ax_cord || null,
     z_ay_cord:       form.z_ay_cord || null,
-    toc_id:          getTocId(),
   }
 
   try {
-    const isAdd = modalMode.value === 'add'
-    const url   = isAdd ? `${STATIONS_API}/` : `${STATIONS_API}/${form.id}/`
-    const res   = await fetch(url, {
-      method:  isAdd ? 'POST' : 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(payload),
-    })
-
-    if (!res.ok) {
-      const json = await res.json().catch(() => ({}))
-      const firstError = json.detail || Object.values(json).flat()[0] || 'Save failed.'
-      modalError.value = firstError
-      return
+    if (modalMode.value === 'add') {
+      await store.createStation(payload)
+    } else {
+      await store.updateStation(form.id, payload)
     }
-
-    await fetchAll()
+    fetchAll()
     closeModal()
-  } catch {
-    modalError.value = 'Network error. Please try again.'
+  } catch (err) {
+    const data = err?.data
+    modalError.value = data?.detail || (data && Object.values(data).flat()[0]) || err?.message || 'Save failed.'
   }
 }
 
 // ── Delete ─────────────────────────────────────────────────────────────────────
 async function confirmDelete() {
-  apiError.value = ''
   try {
-    const res = await fetch(`${STATIONS_API}/${deleteTarget.value.id}/`, { method: 'DELETE' })
-    if (!res.ok) {
-      const json = await res.json().catch(() => ({}))
-      apiError.value = json.detail || 'Delete failed.'
-      deleteOpen.value = false
-      return
-    }
-    // Remove instantly from local list — no round-trip needed
-    const idx = rows.value.findIndex(r => r.id === deleteTarget.value.id)
-    if (idx !== -1) {
-      rows.value.splice(idx, 1)
-      total.value = Math.max(0, total.value - 1)
-    }
-    if (rows.value.length === 0 && page.value > 1) {
+    await store.removeStation(deleteTarget.value.id)
+    if (rows.value.length === 1 && page.value > 1) {
       page.value--
-      await fetchAll()
     }
-  } catch {
-    apiError.value = 'Delete failed. Please try again.'
+    fetchAll()
+  } catch (err) {
+    store.error = err?.data?.detail || 'Delete failed. Please try again.'
   } finally {
     deleteOpen.value = false
   }
 }
 
 onMounted(() => {
+  store.fetchReferenceData()
   fetchAll()
-  fetchServiceTypes()
-  fetchCaseTypes()
 })
 </script>
 
