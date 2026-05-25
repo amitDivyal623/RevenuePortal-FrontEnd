@@ -21,7 +21,7 @@
           <select id="caseTypeFilter" v-model="filterCaseTypeId">
             <option value="">All case types</option>
             <option v-for="ct in caseTypes" :key="ct.case_type_id" :value="ct.case_type_id" :title="ct.code">
-              {{ ct.description }} ({{ ct.case_option }})
+              {{ ct.case_option }} ({{ ct.code }})
             </option>
           </select>
           <span v-if="caseTypeError" class="form-error" role="alert">{{ caseTypeError }}</span>
@@ -75,7 +75,7 @@
               <td><strong>{{ row.name }}</strong></td>
               <td class="text-muted">{{ row.instruction }}</td>
               <td>
-                <span v-if="row.workFromDate === 1" class="badge badge-warning">*Offence Date*</span>
+                <span v-if="row.work_from_date === 1" class="badge badge-warning">*Offence Date*</span>
                 <span v-else class="badge badge-primary">{{ predecessorName(row.predecessor) }}</span>
               </td>
               <td style="text-align:right"><strong>{{ row.days_offset }}</strong></td>
@@ -119,7 +119,7 @@
               <select id="m-caseType" v-model="form.case_type_id" :disabled="modalMode!=='add'" @change="onCaseTypeChange">
                 <option value="">Please Select</option>
                 <option v-for="ct in caseTypes" :key="ct.case_type_id" :value="ct.case_type_id" :title="ct.code">
-                  {{ ct.description }} ({{ ct.case_option }})
+                   {{ ct.case_option }} ({{ ct.code }})
                 </option>
               </select>
               <span v-if="errors.case_type_id" class="form-error">{{ errors.case_type_id }}</span>
@@ -212,8 +212,8 @@
               <label class="form-label" for="m-holder">Holder <span class="req">*</span></label>
               <select id="m-holder" v-model="form.holder" :disabled="modalMode==='view'">
                 <option value="">Please Select</option>
-                <option v-for="r in holderOwnerLookup" :key="`h-${r.lookup_data_id}`" :value="r.lookup_data_id">
-                  {{ r.lookup_data_value }}
+                <option v-for="r in holderOwnerOptions" :key="`h-${r.lookup_data_id}`" :value="r.lookup_data_id">
+                  {{ r.value }}
                 </option>
               </select>
               <span v-if="errors.holder" class="form-error">{{ errors.holder }}</span>
@@ -223,8 +223,8 @@
               <label class="form-label" for="m-owner">Owner <span class="req">*</span></label>
               <select id="m-owner" v-model="form.owner" :disabled="modalMode==='view'">
                 <option value="">Please Select</option>
-                <option v-for="r in holderOwnerLookup" :key="`o-${r.lookup_data_id}`" :value="r.lookup_data_id">
-                  {{ r.lookup_data_value }}
+                <option v-for="r in holderOwnerOptions" :key="`o-${r.lookup_data_id}`" :value="r.lookup_data_id">
+                  {{ r.value }}
                 </option>
               </select>
               <span v-if="errors.owner" class="form-error">{{ errors.owner }}</span>
@@ -262,7 +262,9 @@
               <button v-if="modalMode==='view'" type="button" class="btn btn-secondary" @click="closeModal">Close</button>
               <template v-else>
                 <button type="button" class="btn btn-secondary" @click="closeModal">Cancel</button>
-                <button type="submit" class="btn btn-primary">Save</button>
+                <button type="submit" class="btn btn-primary" :disabled="savePending">
+                  {{ savePending ? 'Saving…' : 'Save' }}
+                </button>
               </template>
             </div>
           </div>
@@ -285,7 +287,9 @@
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" @click="deleteOpen=false">No</button>
-          <button type="button" class="btn btn-danger" @click="confirmDelete">Yes, delete</button>
+          <button type="button" class="btn btn-danger" :disabled="deletePending" @click="confirmDelete">
+            {{ deletePending ? 'Deleting…' : 'Yes, delete' }}
+          </button>
         </div>
       </div>
     </div>
@@ -293,24 +297,51 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import {
-  caseTypes,
-  holderOwnerLookup,
-  actionTypes,
-  emailTemplates,
-  letterTemplates,
-  actionTemplates as seedActionTemplates,
-  communicationAutomationEnabled
-} from '@/mock/actionTemplateData.js'
+import { api } from '@/services/api.js'
+import { communicationAutomationEnabled } from '@/mock/actionTemplateData.js'
 
-/* ════════════════════════════════════════════════════════════════════════
-   State — mirrors the data shape returned by the legacy
-   RevpConfig.actiontemplate / getAction / setAction / getEditAction APIs
-   so future axios integration is a drop-in swap.
-   ════════════════════════════════════════════════════════════════════════ */
-const actions = reactive([...seedActionTemplates])
+const actionTypes     = ref([])
+const emailTemplates  = ref([])
+const letterTemplates = ref([])
+const actions         = ref([])
+
+const caseTypes       = ref([])
+const holderOwnerOptions = ref([])
+const actionsLoading  = ref(false)
+const savePending     = ref(false)
+const deletePending   = ref(false)
+
+async function fetchActionTemplates() {
+  actionsLoading.value = true
+  try {
+    actions.value = await api.get('/api/revp/actions/templates/')
+  } catch (err) {
+    console.error('Failed to load action templates:', err)
+  } finally {
+    actionsLoading.value = false
+  }
+}
+
+onMounted(async () => {
+  try {
+    const [caseTypeData, modalOpts, actionTypeData] = await Promise.all([
+      api.get('/api/revp/cases/types/'),
+      api.get('/api/revp/actions/templates/modal-options/'),
+      api.get('/api/revp/actions/types/'),
+    ])
+    caseTypes.value = caseTypeData
+    holderOwnerOptions.value = modalOpts.holder_owner_options
+    actionTypes.value = actionTypeData.map(t => ({
+      actionTypeID: t.action_type_id,
+      actionTypeName: t.action_type_name,
+    }))
+  } catch (err) {
+    console.error('Failed to load reference data:', err)
+  }
+  fetchActionTemplates()
+})
 
 const filterCaseTypeId = ref('')
 const caseTypeError = ref('')
@@ -359,21 +390,53 @@ const modalTitle = computed(() =>
 )
 
 /* ───────────── Lookups ───────────── */
-const predecessorOptions = computed(() =>
-  actions
-    .filter(a => a.active === 1 && a.case_type_id === form.case_type_id && a.action_template_id !== form.action_template_id)
-    .sort((a, b) => a.name.localeCompare(b.name))
-)
+const predecessorOptions = ref([])
+
+async function fetchPredecessors(caseTypeId) {
+  if (!caseTypeId) {
+    predecessorOptions.value = []
+    return
+  }
+  try {
+    const data = await api.get(`/api/revp/actions/templates/?case_type_id=${encodeURIComponent(caseTypeId)}`)
+    // Exclude the template currently being edited so it can't be its own predecessor
+    predecessorOptions.value = data.filter(t => t.action_template_id !== form.action_template_id)
+  } catch (err) {
+    console.error('Failed to load predecessors:', err)
+    predecessorOptions.value = []
+  }
+}
+
+async function fetchTemplatesForCaseType(caseTypeId) {
+  if (!caseTypeId) {
+    emailTemplates.value  = []
+    letterTemplates.value = []
+    return
+  }
+  try {
+    const id = encodeURIComponent(caseTypeId)
+    const [emailData, letterData] = await Promise.all([
+      api.get(`/api/revp/templates/emails/?case_type_id=${id}&active=true&page_size=100`),
+      api.get(`/api/revp/templates/letters/?case_type_id=${id}&page_size=100`),
+    ])
+    emailTemplates.value  = emailData.results
+    letterTemplates.value = letterData.results
+  } catch (err) {
+    console.error('Failed to load templates for case type:', err)
+    emailTemplates.value  = []
+    letterTemplates.value = []
+  }
+}
 
 function predecessorName(id) {
   if (!id) return '*Offence Date*'
-  const found = actions.find(a => a.action_template_id === id)
+  const found = predecessorOptions.value.find(t => t.action_template_id === id)
   return found ? found.name : '*Offence Date*'
 }
 
 /* ───────────── Action Type-driven visibility (matches legacy JS) ───────────── */
 const selectedActionTypeName = computed(() => {
-  const t = actionTypes.find(a => a.actionTypeID === form.action_type)
+  const t = actionTypes.value.find(a => a.actionTypeID === form.action_type)
   return t?.actionTypeName ?? ''
 })
 const showEmailTemplate   = computed(() => ['Send Email', 'Send Email with Attachment'].includes(selectedActionTypeName.value))
@@ -382,9 +445,23 @@ const showAttachments     = computed(() => selectedActionTypeName.value === 'Sen
 
 watch(() => form.workFromDate, (v) => { if (v === 1) form.predecessor = '' })
 
+/* ───────────── Live error clearing — remove a field's error the moment it becomes valid ───────────── */
+watch(() => form.name,          v  => { if (errors.name          && v?.trim())                               delete errors.name })
+watch(() => form.instruction,   v  => { if (errors.instruction   && v?.trim())                               delete errors.instruction })
+watch(() => form.days_offset,   v  => { if (errors.days_offset   && v !== '' && v !== null && !isNaN(v))     delete errors.days_offset })
+watch(() => form.holder,        v  => { if (errors.holder        && v)                                       delete errors.holder })
+watch(() => form.owner,         v  => { if (errors.owner         && v)                                       delete errors.owner })
+watch(() => form.case_type_id,  v  => { if (errors.case_type_id  && v)                                       delete errors.case_type_id })
+watch(() => form.action_type,   v  => { if (errors.action_type   && v)                                       delete errors.action_type })
+watch(() => form.EmailTemplate, v  => { if (errors.EmailTemplate && v)                                       delete errors.EmailTemplate })
+watch(() => form.LetterTemplate,v  => { if (errors.LetterTemplate && v)                                      delete errors.LetterTemplate })
+watch(() => [form.workFromDate, form.predecessor], ([wfd, pred]) => {
+  if (formError.value && (wfd === 1 || pred)) formError.value = ''
+})
+
 /* ───────────── Filtering / sorting / paging ───────────── */
 const filteredActions = computed(() =>
-  actions
+  actions.value
     .filter(a => a.active === 1)
     .filter(a => !filterCaseTypeId.value || a.case_type_id === filterCaseTypeId.value)
 )
@@ -429,40 +506,47 @@ function resetForm() {
 
 function openAdd() {
   resetForm()
-  // Pre-fill case type from the page-level filter when one is active, otherwise leave blank
   form.case_type_id = filterCaseTypeId.value || ''
   caseTypeError.value = ''
   modalMode.value = 'add'
   modalOpen.value = true
+  fetchPredecessors(form.case_type_id)
+  fetchTemplatesForCaseType(form.case_type_id)
 }
 
 function onCaseTypeChange() {
-  // Clear the predecessor when case type changes, since predecessor list is filtered by case_type_id
-  form.predecessor = ''
+  form.predecessor    = ''
+  form.EmailTemplate  = ''
+  form.LetterTemplate = ''
+  form.attachments    = ['']
   if (errors.case_type_id) delete errors.case_type_id
+  fetchPredecessors(form.case_type_id)
+  fetchTemplatesForCaseType(form.case_type_id)
 }
 
 function loadIntoForm(row) {
+  const noticeVal = parseFloat(row.pcn_notice_to_owner) || 0
+  const certVal   = parseFloat(row.pcn_charge_certificate) || 0
   Object.assign(form, blankForm(), {
-    action_template_id: row.action_template_id,
-    case_type_id: row.case_type_id,
-    name: row.name,
-    instruction: row.instruction,
-    predecessor: row.predecessor ?? '',
-    workFromDate: row.workFromDate ?? 0,
-    days_offset: row.days_offset ?? 0,
-    holder: row.holder ?? '',
-    owner: row.owner ?? '',
-    pcnNoticeToOwnerFlag: Number(row.pcnNoticeToOwner) > 0,
-    pcnChargeCertificateFlag: Number(row.pcnChargeCertificate) > 0,
-    pcnNoticeToOwner: row.pcnNoticeToOwner ?? '0.00',
-    pcnChargeCertificate: row.pcnChargeCertificate ?? '0.00',
-    adminCost: row.adminCost ?? '0.00',
-    action_type: row.action_type ?? '',
-    EmailTemplate: row.EmailTemplate ?? '',
-    LetterTemplate: row.LetterTemplate ?? '',
-    attachments: (row.attachments && row.attachments.length) ? [...row.attachments] : [''],
-    active: row.active ?? 1
+    action_template_id:     row.action_template_id,
+    case_type_id:           row.case_type_id,
+    name:                   row.name ?? '',
+    instruction:            row.instruction ?? '',
+    predecessor:            row.predecessor ?? '',
+    workFromDate:           row.work_from_date ?? 0,
+    days_offset:            row.days_offset ?? 0,
+    holder:                 row.holder ?? '',
+    owner:                  row.owner ?? '',
+    pcnNoticeToOwnerFlag:   noticeVal > 0,
+    pcnChargeCertificateFlag: certVal > 0,
+    pcnNoticeToOwner:       noticeVal.toFixed(2),
+    pcnChargeCertificate:   certVal.toFixed(2),
+    adminCost:              parseFloat(row.admin_cost || 0).toFixed(2),
+    action_type:            row.action_type ?? '',
+    EmailTemplate:          row.email_template ?? '',
+    LetterTemplate:         row.letter_template ?? '',
+    attachments:            (row.attachments?.length) ? [...row.attachments] : [''],
+    active:                 row.active ?? 1,
   })
 }
 
@@ -471,6 +555,8 @@ function openEdit(row) {
   loadIntoForm(row)
   modalMode.value = 'edit'
   modalOpen.value = true
+  fetchPredecessors(row.case_type_id)
+  fetchTemplatesForCaseType(row.case_type_id)
 }
 
 function openView(row) {
@@ -478,6 +564,8 @@ function openView(row) {
   loadIntoForm(row)
   modalMode.value = 'view'
   modalOpen.value = true
+  fetchPredecessors(row.case_type_id)
+  fetchTemplatesForCaseType(row.case_type_id)
 }
 
 function closeModal() {
@@ -489,15 +577,20 @@ function openDelete(row) {
   deleteTarget.value = row
   deleteOpen.value = true
 }
-function confirmDelete() {
+async function confirmDelete() {
   const id = deleteTarget.value?.action_template_id
   if (!id) return
-  // Mirrors legacy deleteAction: mark inactive + null any predecessor pointing at this id
-  const target = actions.find(a => a.action_template_id === id)
-  if (target) target.active = 0
-  actions.forEach(a => { if (a.predecessor === id) a.predecessor = '' })
-  deleteOpen.value = false
-  deleteTarget.value = null
+  deletePending.value = true
+  try {
+    await api.delete(`/api/revp/actions/templates/${encodeURIComponent(id)}/delete/`)
+    deleteOpen.value = false
+    deleteTarget.value = null
+    await fetchActionTemplates()
+  } catch (err) {
+    console.error('Delete failed:', err)
+  } finally {
+    deletePending.value = false
+  }
 }
 
 /* ───────────── Add attachment management ───────────── */
@@ -545,41 +638,42 @@ function validate() {
   return ok
 }
 
-function saveAction() {
+async function saveAction() {
   if (!validate()) return
-
-  // Map flag booleans back into the legacy money-string fields ('0.00' or a TOC-configured value)
-  // In real backend the value comes from revp_tocVarConfig.value — stub here.
-  const noticeOwnerValue       = form.pcnNoticeToOwnerFlag     ? '70.00' : '0.00'
-  const chargeCertificateValue = form.pcnChargeCertificateFlag ? '60.00' : '0.00'
+  savePending.value = true
+  formError.value = ''
 
   const payload = {
-    action_template_id: form.action_template_id || crypto.randomUUID(),
-    case_type_id: form.case_type_id,
-    name: form.name.trim(),
-    instruction: form.instruction.trim(),
-    predecessor: form.workFromDate === 1 ? '' : form.predecessor,
-    workFromDate: form.workFromDate,
-    days_offset: Number(form.days_offset) || 0,
-    holder: form.holder,
-    owner: form.owner,
-    pcnNoticeToOwner: noticeOwnerValue,
-    pcnChargeCertificate: chargeCertificateValue,
-    adminCost: form.adminCost,
-    action_type: form.action_type,
-    EmailTemplate: form.EmailTemplate,
-    LetterTemplate: form.LetterTemplate,
-    attachments: showAttachments.value ? form.attachments.filter(Boolean) : [],
-    active: 1
+    case_type_id:           form.case_type_id,
+    name:                   form.name.trim(),
+    instruction:            form.instruction.trim(),
+    predecessor:            form.workFromDate === 1 ? null : (form.predecessor || null),
+    work_from_date:         form.workFromDate,
+    days_offset:            Number(form.days_offset) || 0,
+    holder:                 form.holder,
+    owner:                  form.owner,
+    pcn_notice_to_owner:    form.pcnNoticeToOwnerFlag     ? 70.0 : 0.0,
+    pcn_charge_certificate: form.pcnChargeCertificateFlag ? 60.0 : 0.0,
+    admin_cost:             parseFloat(form.adminCost) || 0,
+    action_type:            form.action_type || null,
+    email_template:         form.EmailTemplate || null,
+    letter_template:        form.LetterTemplate || null,
+    attachments:            showAttachments.value ? form.attachments.filter(Boolean) : [],
   }
 
-  if (modalMode.value === 'edit') {
-    const idx = actions.findIndex(a => a.action_template_id === payload.action_template_id)
-    if (idx !== -1) Object.assign(actions[idx], payload)
-  } else {
-    actions.push(payload)
+  try {
+    if (modalMode.value === 'edit') {
+      await api.put(`/api/revp/actions/templates/${encodeURIComponent(form.action_template_id)}/`, payload)
+    } else {
+      await api.post('/api/revp/actions/templates/', payload)
+    }
+    closeModal()
+    await fetchActionTemplates()
+  } catch (err) {
+    formError.value = err?.body?.detail || err?.message || 'Save failed. Please try again.'
+  } finally {
+    savePending.value = false
   }
-  closeModal()
 }
 </script>
 

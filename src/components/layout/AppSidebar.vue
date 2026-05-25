@@ -77,14 +77,7 @@ const icons = {
 const navSections = [
   {
     items: [
-      { name: 'dashboard', label: 'Homepage', to: '/dashboard', icon: icons.home },
-      {
-        name: 'claims', label: 'Claims', icon: icons.pound,
-        children: [
-          { name: 'claims-list',    label: 'Claims list',    to: '/dashboard' },
-          { name: 'claims-pending', label: 'Pending claims', to: '/dashboard' }
-        ]
-      }
+      { name: 'dashboard', label: 'Homepage', to: '/dashboard', icon: icons.home }
     ],
     divider: true
   },
@@ -133,16 +126,7 @@ const navSections = [
   {
     items: [
       { name: 'journey-finder',  label: 'Journey Finder',       to: '/dashboard', icon: icons.compass },
-      { name: 'ticket-enquiry',  label: 'Ticket Enquiry',       to: '/dashboard', icon: icons.ticket },
-      { name: 'users',           label: 'Users',                to: '/dashboard', icon: icons.users },
-      {
-        name: 'charmMobile', label: 'CHARM Mobile', icon: icons.mobile,
-        children: [
-          { name: 'charm-cases',    label: 'CHARM Cases',    to: '/dashboard' },
-          { name: 'charm-devices',  label: 'CHARM Devices',  to: '/dashboard' }
-        ]
-      },
-      { name: 'individual-reporting', label: 'Individual Reporting', to: '/dashboard', icon: icons.chart }
+      { name: 'users',           label: 'Users',                to: '/dashboard', icon: icons.users }
     ]
   }
 ]

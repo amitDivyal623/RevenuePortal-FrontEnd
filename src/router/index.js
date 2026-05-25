@@ -1,5 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { useAuthStore } from '@/store/auth.js'
 
 const LoginView            = () => import('@/views/LoginView.vue')
 const DashboardView        = () => import('@/views/DashboardView.vue')
@@ -38,7 +37,7 @@ const PlaceholderView      = () => import('@/views/PlaceholderView.vue')
 const NotFoundView         = () => import('@/views/NotFoundView.vue')
 const ForbiddenView        = () => import('@/views/ForbiddenView.vue')
 
-const adminParent = 'Revenue Protection Admin'
+const adminParent   = 'Revenue Protection Admin'
 const stationParent = 'Station Management'
 
 const routes = [
@@ -91,21 +90,28 @@ const router = createRouter({
   scrollBehavior: () => ({ top: 0 })
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   document.title = `${to.meta.title ?? 'Agent'} | Agent Portal`
+
+  // Public routes — no auth check needed
+  if (to.meta.public) return true
+
+  // Lazy-import the store here to avoid circular dependency at module load time
+  const { useAuthStore } = await import('@/store/auth.js')
   const auth = useAuthStore()
 
-  if (to.meta.public) {
-    if (to.name === 'login' && auth.isAuthenticated) return { name: 'dashboard' }
-    return true
-  }
   if (!auth.isAuthenticated) {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
+
+  // Permission check — redirect to /403 if the user lacks the required permission
   if (to.meta.permission && !auth.hasPermission(to.meta.permission)) {
     return { name: 'forbidden' }
   }
+
+  // Reset session inactivity timer on every navigation
   auth.resetSessionTimer()
+
   return true
 })
 
