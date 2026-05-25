@@ -66,25 +66,14 @@ function hasActiveChild(item) {
 
 const icons = {
   home:    `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>`,
-  pound:   `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 7c0-5.333-8-5.333-8 0"/><path d="M10 7v6h6"/><path d="M6 13h11"/><path d="M6 19h13"/></svg>`,
   compass: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>`,
-  ticket:  `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 0 0 4v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4a2 2 0 0 0 0-4z"/><line x1="13" y1="5" x2="13" y2="7"/><line x1="13" y1="11" x2="13" y2="13"/><line x1="13" y1="17" x2="13" y2="19"/></svg>`,
-  users:   `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
-  mobile:  `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>`,
-  chart:   `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>`
+  users:   `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`
 }
 
 const navSections = [
   {
     items: [
-      { name: 'dashboard', label: 'Homepage', to: '/dashboard', icon: icons.home },
-      {
-        name: 'claims', label: 'Claims', icon: icons.pound,
-        children: [
-          { name: 'claims-list',    label: 'Claims list',    to: '/dashboard' },
-          { name: 'claims-pending', label: 'Pending claims', to: '/dashboard' }
-        ]
-      }
+      { name: 'dashboard', label: 'Homepage', to: '/dashboard', icon: icons.home }
     ],
     divider: true
   },
@@ -133,16 +122,7 @@ const navSections = [
   {
     items: [
       { name: 'journey-finder',  label: 'Journey Finder',       to: '/dashboard', icon: icons.compass },
-      { name: 'ticket-enquiry',  label: 'Ticket Enquiry',       to: '/dashboard', icon: icons.ticket },
-      { name: 'users',           label: 'Users',                to: '/dashboard', icon: icons.users },
-      {
-        name: 'charmMobile', label: 'CHARM Mobile', icon: icons.mobile,
-        children: [
-          { name: 'charm-cases',    label: 'CHARM Cases',    to: '/dashboard' },
-          { name: 'charm-devices',  label: 'CHARM Devices',  to: '/dashboard' }
-        ]
-      },
-      { name: 'individual-reporting', label: 'Individual Reporting', to: '/dashboard', icon: icons.chart }
+      { name: 'users',           label: 'Users',                to: '/dashboard', icon: icons.users }
     ]
   }
 ]

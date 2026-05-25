@@ -1,58 +1,115 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { sanitizeString, generateCSRFToken } from '@/utils/security.js'
+import { decodeJwt } from '@/utils/jwt.js'
+import { apiGet, apiPost, apiPostPublic, ApiError } from '@/services/api.js'
+
+const REFRESH_KEY = 'revp.refresh'
+const DEFAULT_TOC_ID = import.meta.env.VITE_DEFAULT_TOC_ID || ''
+const IDLE_TIMEOUT_MS = 30 * 60 * 1000
 
 export const useAuthStore = defineStore('auth', () => {
-  const user = ref({
-    id: 1,
-    name: 'Asif Ansari',
-    email: 'asif@divyaltech.com',
-    role: 'Admin',
-    initials: 'AA',
-    toc_id: '',   // populated after login; empty = fallback to DEFAULT_TOC_ID in API layer
-    permissions: ['dashboard', 'cases', 'admin', 'reports']
-  })
-  const csrfToken = ref(generateCSRFToken())
-  const sessionTimeout = ref(null)
-  const SESSION_DURATION = 30 * 60 * 1000
+  const accessToken  = ref(null)
+  const refreshToken = ref(localStorage.getItem(REFRESH_KEY))
+  const user         = ref(null)
+  const tocId        = ref(null)
+  const ready        = ref(false)
+  let idleTimer = null
 
-  const isAuthenticated = computed(() => !!user.value)
+  const isAuthenticated = computed(() => !!accessToken.value || !!refreshToken.value)
 
-  function login(credentials) {
-    const username = sanitizeString(credentials.username)
-    if (!username) return { success: false, error: 'Invalid credentials' }
-
-    if (username === 'admin' && credentials.password === 'Admin@1234') {
-      user.value = {
-        id: 1,
-        name: 'Asif Ansari',
-        email: 'asif@divyaltech.com',
-        role: 'Admin',
-        initials: 'AA',
-        toc_id: '',   // set from JWT once auth is wired up; empty = use backend default
-        permissions: ['dashboard', 'cases', 'admin', 'reports']
-      }
-      resetSessionTimer()
-      csrfToken.value = generateCSRFToken()
-      return { success: true }
-    }
-    return { success: false, error: 'Invalid username or password' }
+  function persistRefresh(token) {
+    refreshToken.value = token
+    if (token) localStorage.setItem(REFRESH_KEY, token)
+    else localStorage.removeItem(REFRESH_KEY)
   }
 
-  function logout() {
-    user.value = null
-    csrfToken.value = generateCSRFToken()
-    clearTimeout(sessionTimeout.value)
+  function applyTokens({ access, refresh }) {
+    accessToken.value = access || null
+    if (refresh !== undefined) persistRefresh(refresh || null)
+    const claims = decodeJwt(access)
+    if (claims?.toc_id) tocId.value = claims.toc_id
   }
 
   function resetSessionTimer() {
-    clearTimeout(sessionTimeout.value)
-    sessionTimeout.value = setTimeout(logout, SESSION_DURATION)
+    if (idleTimer) clearTimeout(idleTimer)
+    if (isAuthenticated.value) {
+      idleTimer = setTimeout(() => { logout() }, IDLE_TIMEOUT_MS)
+    }
   }
 
-  function hasPermission(permission) {
-    return user.value?.permissions?.includes(permission) ?? false
+  async function login({ username, password, toc_id }) {
+    const tocToSend = (toc_id || DEFAULT_TOC_ID || '').trim()
+    if (!tocToSend) {
+      throw new ApiError({ status: 400, data: { toc_id: 'missing — set VITE_DEFAULT_TOC_ID in .env' } })
+    }
+    const tokens = await apiPostPublic('/auth/login/', {
+      username,
+      password,
+      toc_id: tocToSend,
+    })
+    applyTokens(tokens)
+    await fetchProfile()
+    resetSessionTimer()
   }
 
-  return { user, csrfToken, isAuthenticated, login, logout, hasPermission, resetSessionTimer }
+  async function refresh() {
+    if (!refreshToken.value) {
+      throw new ApiError({ status: 401, data: { detail: 'No refresh token.' } })
+    }
+    const tokens = await apiPostPublic('/auth/refresh/', { refresh: refreshToken.value })
+    applyTokens(tokens)
+  }
+
+  async function logout({ skipServer = false } = {}) {
+    const rt = refreshToken.value
+    if (!skipServer && rt && accessToken.value) {
+      try { await apiPost('/auth/logout/', { refresh: rt }) } catch { /* clear locally regardless */ }
+    }
+    accessToken.value = null
+    user.value = null
+    tocId.value = null
+    persistRefresh(null)
+    if (idleTimer) { clearTimeout(idleTimer); idleTimer = null }
+  }
+
+  async function fetchProfile() {
+    const claims = decodeJwt(accessToken.value)
+    if (!claims?.user_id) return
+    try {
+      const data = await apiGet(`/auth/users/${claims.user_id}/`)
+      user.value = {
+        user_id: data.user_id,
+        username: data.username,
+        first_name: data.first_name,
+        surname: data.surname,
+        email_address: data.email_address,
+        roles: data.roles || [],
+        initials: ((data.first_name?.[0] || '') + (data.surname?.[0] || '')).toUpperCase(),
+      }
+    } catch (err) {
+      console.warn('fetchProfile failed', err)
+    }
+  }
+
+  async function hydrate() {
+    if (refreshToken.value) {
+      try {
+        await refresh()
+        await fetchProfile()
+        resetSessionTimer()
+      } catch {
+        await logout({ skipServer: true })
+      }
+    }
+    ready.value = true
+  }
+
+  function hasPermission(_permission) {
+    return isAuthenticated.value
+  }
+
+  return {
+    accessToken, refreshToken, user, tocId, ready, isAuthenticated,
+    login, refresh, logout, fetchProfile, hydrate, resetSessionTimer, hasPermission,
+  }
 })
