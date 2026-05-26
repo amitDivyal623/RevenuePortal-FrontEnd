@@ -3,33 +3,41 @@ import { ref } from 'vue'
 import { courtBookingService } from '@/services/court-booking.service.js'
 
 export const useCourtBookingStore = defineStore('courtBooking', () => {
-  const courts = ref([])
-  const bookings = ref([])
+  const courts      = ref([])
+  const bookings    = ref([])
+  const prosecutors = ref([])
   const totalRecords = ref(0)
   const loading = ref(false)
-  const error = ref(null)
+  const error   = ref(null)
 
   async function fetchCourts() {
     try {
-      const data = await courtBookingService.getCourts({ page_size: 200 })
-      courts.value = Array.isArray(data.results) && data.results.length
-        ? data.results
-        : [{ court_id: 'fallback-0', name: 'Barkingside' }]
+      const data = await courtBookingService.getCourts({ page_size: 200, active: 1 })
+      courts.value = Array.isArray(data.results) ? data.results : []
     } catch {
-      courts.value = [{ court_id: 'fallback-0', name: 'Barkingside' }]
+      courts.value = []
+    }
+  }
+
+  async function fetchProsecutors() {
+    try {
+      const data = await courtBookingService.getProsecutors()
+      prosecutors.value = Array.isArray(data) ? data : []
+    } catch {
+      prosecutors.value = []
     }
   }
 
   async function fetchBookings(params = {}) {
     loading.value = true
-    error.value = null
+    error.value   = null
     try {
       const data = await courtBookingService.getBookings(params)
-      bookings.value = data.results ?? []
-      totalRecords.value = data.total ?? 0
+      bookings.value     = data.results ?? []
+      totalRecords.value = data.total   ?? 0
     } catch (err) {
-      error.value = 'Failed to load bookings.'
-      bookings.value = []
+      error.value        = 'Failed to load bookings.'
+      bookings.value     = []
       totalRecords.value = 0
     } finally {
       loading.value = false
@@ -44,12 +52,9 @@ export const useCourtBookingStore = defineStore('courtBooking', () => {
     return courtBookingService.updateBooking(id, payload)
   }
 
-  async function removeBooking(id) {
-    return courtBookingService.deleteBooking(id)
-  }
-
   return {
-    courts, bookings, totalRecords, loading, error,
-    fetchCourts, fetchBookings, createBooking, updateBooking, removeBooking,
+    courts, bookings, prosecutors, totalRecords, loading, error,
+    fetchCourts, fetchProsecutors, fetchBookings,
+    createBooking, updateBooking,
   }
 })

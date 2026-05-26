@@ -1,9 +1,10 @@
 import { api } from '@/services/api.js'
 
 export const courtBookingService = {
-  getCourts: (params = {}) => api.get(`/v1/courts/?${new URLSearchParams(params)}`),
-  getBookings: (params = {}) => api.get(`/v1/court-bookings/?${new URLSearchParams(params)}`),
-  createBooking: (payload) => api.post('/v1/court-bookings/', payload),
-  updateBooking: (id, payload) => api.put(`/v1/court-bookings/${id}/`, payload),
-  deleteBooking: (id) => api.delete(`/v1/court-bookings/${id}/`),
+  getCourts:      (params = {}) => api.get(`/revp/courts/?${new URLSearchParams(params)}`),
+  getProsecutors: () => api.get('/revp/courts/prosecutors/'),
+  getBookings:    (params = {}) => api.get(`/revp/courts/bookings/?${new URLSearchParams(params)}`),
+  createBooking:  (payload) => api.post('/revp/courts/bookings/create/', payload),
+  getBookingById: (id) => api.get(`/revp/courts/bookings/${encodeURIComponent(id)}/`),
+  updateBooking:  (id, payload) => api.put(`/revp/courts/bookings/${encodeURIComponent(id)}/update/`, payload),
 }

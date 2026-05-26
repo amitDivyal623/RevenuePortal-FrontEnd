@@ -1,8 +1,9 @@
 import { api } from '@/services/api.js'
 
 export const adminCourtsService = {
-  getAll: (params = {}) => api.get(`/v1/courts/?${new URLSearchParams(params)}`),
-  getById: (id) => api.get(`/v1/courts/${id}/`),
-  create: (payload) => api.post('/v1/courts/', payload),
-  update: (id, payload) => api.put(`/v1/courts/${id}/`, payload),
+  getAll:  (params = {}) => api.get(`/revp/courts/?${new URLSearchParams(params)}`),
+  getById: (id) => api.get(`/revp/courts/${encodeURIComponent(id)}/`),
+  create:  (payload) => api.post('/revp/courts/create/', payload),
+  update:  (id, payload) => api.put(`/revp/courts/${encodeURIComponent(id)}/update/`, payload),
+  remove:  (id) => api.delete(`/revp/courts/${encodeURIComponent(id)}/delete/`),
 }

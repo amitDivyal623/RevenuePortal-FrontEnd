@@ -36,8 +36,12 @@ export const useAdminCourtsStore = defineStore('adminCourts', () => {
     return adminCourtsService.update(id, payload)
   }
 
+  async function removeCourt(id) {
+    await adminCourtsService.remove(id)
+  }
+
   return {
     courts, totalRecords, loading, error,
-    fetchCourts, fetchCourtById, createCourt, updateCourt,
+    fetchCourts, fetchCourtById, createCourt, updateCourt, removeCourt,
   }
 })

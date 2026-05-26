@@ -21,6 +21,14 @@
             <option v-for="c in courts" :key="c.court_id" :value="c.court_id">{{ c.name }}</option>
           </select>
         </div>
+        <div class="form-group">
+          <label class="form-label">Date From</label>
+          <input v-model="dateFrom" type="date" />
+        </div>
+        <div class="form-group">
+          <label class="form-label">Date To</label>
+          <input v-model="dateTo" type="date" />
+        </div>
       </div>
       <div class="flex" style="justify-content: flex-end">
         <button class="btn-search" @click="applyFilter">SEARCH</button>
@@ -56,7 +64,7 @@
               <th @click="sort('court_name')" class="sortable">Court {{ sortIcon('court_name') }}</th>
               <th @click="sort('start_dt')" class="sortable">Start Date/Time {{ sortIcon('start_dt') }}</th>
               <th @click="sort('capacity')" class="sortable">Capacity {{ sortIcon('capacity') }}</th>
-              <th @click="sort('duration')" class="sortable">Cases Assigned {{ sortIcon('duration') }}</th>
+              <th>Cases Assigned</th>
               <th @click="sort('prosecutor_name')" class="sortable">Prosecutor {{ sortIcon('prosecutor_name') }}</th>
               <th>Action</th>
             </tr>
@@ -66,10 +74,7 @@
               <td>{{ row.court_name }}</td>
               <td>{{ formatStartDT(row.start_dt) }}</td>
               <td>{{ row.capacity }}</td>
-              <td>
-                <span v-if="row.duration > 0" class="link-cell">{{ row.duration }}</span>
-                <span v-else>{{ row.duration }}</span>
-              </td>
+              <td>{{ row.cases_assigned ?? 0 }}</td>
               <td>{{ row.prosecutor_name }}</td>
               <td>
                 <button class="edit-link" @click="openEditModal(row)">Edit</button>
@@ -132,14 +137,17 @@
             <label class="modal-label">Prosecutor</label>
             <select v-model="modalForm.prosecutor">
               <option value="">Prosecutor</option>
-              <option v-for="p in prosecutors" :key="p" :value="p">{{ p }}</option>
+              <option v-for="p in prosecutors" :key="p.prosecutor_id" :value="p.prosecutor_id">{{ p.name }}</option>
             </select>
           </div>
         </div>
 
         <div class="modal-footer">
+          <p v-if="saveError" class="save-error">{{ saveError }}</p>
           <button class="btn-cancel" @click="closeModal">CANCEL</button>
-          <button class="btn-save" @click="saveBooking">SAVE</button>
+          <button class="btn-save" :disabled="saving" @click="saveBooking">
+            {{ saving ? 'SAVING…' : 'SAVE' }}
+          </button>
         </div>
       </div>
     </div>
@@ -153,7 +161,7 @@ import { useCourtBookingStore } from '@/store/court-booking.store.js'
 
 const store = useCourtBookingStore()
 
-const prosecutors = ['Mr John Tester', 'Ms Brock', 'Ms Test Prosecutor', 'Mr A. Smith', 'Ms L. Chen']
+const prosecutors = computed(() => store.prosecutors)
 
 const courts       = computed(() => store.courts)
 const bookings     = computed(() => store.bookings)
@@ -161,6 +169,8 @@ const totalRecords = computed(() => store.totalRecords)
 const loading      = computed(() => store.loading)
 
 const filterCourt = ref('')
+const dateFrom = ref('')
+const dateTo = ref('')
 const perPage = ref(10)
 const currentPage = ref(1)
 const sortKey = ref('start_dt')
@@ -187,6 +197,8 @@ function buildBookingParams() {
     direction: sortDir.value,
   }
   if (filterCourt.value) params.court_id = filterCourt.value
+  if (dateFrom.value) params.date_from = dateFrom.value
+  if (dateTo.value) params.date_to = dateTo.value
   return params
 }
 
@@ -196,6 +208,7 @@ function loadBookings() {
 
 onMounted(() => {
   store.fetchCourts()
+  store.fetchProsecutors()
   loadBookings()
 })
 watch([currentPage, perPage, sortKey, sortDir], loadBookings)
@@ -226,6 +239,8 @@ function printDiary() { /* hook to API */ }
 
 const showModal = ref(false)
 const modalMode = ref('add')
+const saving = ref(false)
+const saveError = ref('')
 const modalForm = reactive({
   bookingId: null,
   court: '',
@@ -260,14 +275,54 @@ function openEditModal(row) {
     date: isoDate,
     time: isoTime,
     capacity: row.capacity,
-    prosecutor: row.prosecutor_name || ''
+    prosecutor: row.prosecutor_id || ''
   })
   showModal.value = true
 }
 
-function closeModal() { showModal.value = false }
-function saveBooking() {
-  closeModal()
+function closeModal() {
+  showModal.value = false
+  saveError.value = ''
+}
+
+async function saveBooking() {
+  saveError.value = ''
+  if (!modalForm.court) { saveError.value = 'Please select a court.'; return }
+  if (!modalForm.date || !modalForm.time) { saveError.value = 'Start date and time are required.'; return }
+  if (!modalForm.capacity || modalForm.capacity < 1) { saveError.value = 'Capacity must be at least 1.'; return }
+
+  const startDt = `${modalForm.date}T${modalForm.time}:00`
+  saving.value = true
+  try {
+    if (modalMode.value === 'edit') {
+      await store.updateBooking(modalForm.bookingId, {
+        start_dt:   startDt,
+        capacity:   modalForm.capacity,
+        prosecutor: modalForm.prosecutor || null,
+      })
+    } else {
+      await store.createBooking({
+        court_id:   modalForm.court,
+        start_dt:   startDt,
+        capacity:   modalForm.capacity,
+        prosecutor: modalForm.prosecutor || null,
+      })
+    }
+    closeModal()
+    loadBookings()
+  } catch (err) {
+    const data = err?.data
+    if (data && typeof data === 'object') {
+      saveError.value = Object.entries(data).map(([k, v]) => {
+        const text = Array.isArray(v) ? v.join(', ') : String(v)
+        return k === 'detail' ? text : `${k}: ${text}`
+      }).join(' | ')
+    } else {
+      saveError.value = err?.message || 'Failed to save booking.'
+    }
+  } finally {
+    saving.value = false
+  }
 }
 
 function onEscKey(e) {
@@ -434,6 +489,15 @@ onUnmounted(() => document.removeEventListener('keydown', onEscKey))
   transition: background var(--transition);
 }
 .btn-save:hover { background: #128968; }
+.btn-save:disabled { background: #a0a0a0; cursor: not-allowed; }
+
+.save-error {
+  flex: 1;
+  font-size: 12px;
+  color: var(--danger);
+  margin: 0;
+  align-self: center;
+}
 
 @media (max-width: 600px) {
   .modal-form-row { grid-template-columns: 1fr; }

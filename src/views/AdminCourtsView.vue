@@ -35,6 +35,9 @@
       </div>
     </div>
 
+    <!-- List error banner -->
+    <div v-if="store.error" class="error-banner">{{ store.error }}</div>
+
     <!-- Courts table -->
     <div class="card card-padded">
       <div class="toolbar">
@@ -70,7 +73,10 @@
                 </span>
               </td>
               <td style="text-align: right">
-                <button class="edit-link" @click="openEditModal(row.court_id)">Edit</button>
+                <div class="flex gap-xs" style="justify-content: flex-end">
+                  <button class="edit-link" @click="openEditModal(row.court_id)">Edit</button>
+                  <button class="delete-link" @click="openDeleteModal(row)">Delete</button>
+                </div>
               </td>
             </tr>
             <tr v-if="courts.length === 0">
@@ -148,7 +154,7 @@
             <div class="modal-grid">
               <div class="field">
                 <label>Postcode <span class="req">*</span></label>
-                <input v-model="form.court_address.post_code" type="text" maxlength="10" />
+                <input v-model="form.court_address.postcode" type="text" maxlength="10" />
               </div>
               <div class="field">
                 <label>House Name</label>
@@ -184,7 +190,7 @@
             <div class="modal-grid">
               <div class="field">
                 <label>Postcode <span class="req" v-if="!form.address_for_admin">*</span></label>
-                <input v-model="form.admin_address.post_code" type="text" maxlength="10" :disabled="form.address_for_admin" />
+                <input v-model="form.admin_address.postcode" type="text" maxlength="10" :disabled="form.address_for_admin" />
               </div>
               <div class="field">
                 <label>House Name</label>
@@ -221,6 +227,28 @@
           <button class="btn-cancel" @click="closeModal" :disabled="saving">CANCEL</button>
           <button class="btn-save" @click="saveCourt" :disabled="saving">
             {{ saving ? 'SAVING…' : 'SAVE' }}
+          </button>
+        </div>
+      </div>
+    </div>
+    <!-- Delete confirmation modal -->
+    <div v-if="deleteOpen" class="modal-backdrop" @click.self="deleteOpen = false">
+      <div class="modal-card" role="dialog">
+        <div class="modal-header">
+          <h2 class="modal-title">Delete Court Details</h2>
+          <button class="modal-close" @click="deleteOpen = false" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <strong>Do you want to remove this data permanently?</strong>
+          <p style="margin-top: 8px; font-size: 13px; color: var(--text-muted)">
+            "{{ deleteTarget?.name }}" ({{ deleteTarget?.code }})
+          </p>
+          <p v-if="deleteError" class="form-error">{{ deleteError }}</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-cancel" @click="deleteOpen = false" :disabled="deleting">CANCEL</button>
+          <button class="btn-save" style="background: var(--danger)" @click="confirmDelete" :disabled="deleting">
+            {{ deleting ? 'DELETING…' : 'YES, DELETE' }}
           </button>
         </div>
       </div>
@@ -308,7 +336,7 @@ const saving = ref(false)
 const saveError = ref('')
 
 const emptyAddress = () => ({
-  post_code: '', house_name: '', house_no: '',
+  postcode: '', house_name: '', house_no: '',
   street: '', locality: '', town: '', country_name: ''
 })
 
@@ -358,12 +386,12 @@ async function openEditModal(courtId) {
     const ca = data.court_address || {}
     const aa = data.admin_address || {}
     Object.assign(form.court_address, {
-      post_code: ca.post_code || '', house_name: ca.house_name || '',
+      postcode: ca.postcode || '', house_name: ca.house_name || '',
       house_no: ca.house_no || '', street: ca.street || '',
       locality: ca.locality || '', town: ca.town || '', country_name: ca.country_name || ''
     })
     Object.assign(form.admin_address, {
-      post_code: aa.post_code || '', house_name: aa.house_name || '',
+      postcode: aa.postcode || '', house_name: aa.house_name || '',
       house_no: aa.house_no || '', street: aa.street || '',
       locality: aa.locality || '', town: aa.town || '', country_name: aa.country_name || ''
     })
@@ -378,7 +406,7 @@ function closeModal() {
 }
 
 function buildPayload() {
-  return {
+  const payload = {
     name: form.name.trim(),
     code: form.code.trim(),
     area: form.area.trim(),
@@ -386,8 +414,22 @@ function buildPayload() {
     is_hide_filter_lists: form.is_hide_filter_lists ? 1 : 0,
     address_for_admin: form.address_for_admin ? 1 : 0,
     court_address: { ...form.court_address },
-    admin_address: form.address_for_admin ? {} : { ...form.admin_address }
   }
+  if (!form.address_for_admin) {
+    payload.admin_address = { ...form.admin_address }
+  }
+  return payload
+}
+
+function extractErrorMessage(err) {
+  const data = err?.data
+  if (!data) return err?.message || 'Please try again.'
+  if (typeof data === 'string') return data
+  const msgs = Object.entries(data).map(([k, v]) => {
+    const text = Array.isArray(v) ? v.join(', ') : String(v)
+    return k === 'detail' ? text : `${k}: ${text}`
+  })
+  return msgs.join(' | ')
 }
 
 async function saveCourt() {
@@ -403,9 +445,39 @@ async function saveCourt() {
     showModal.value = false
     loadCourts()
   } catch (err) {
-    saveError.value = `Save failed — ${err?.message || 'Please try again.'}`
+    saveError.value = extractErrorMessage(err)
   } finally {
     saving.value = false
+  }
+}
+
+// Delete state
+const deleteOpen   = ref(false)
+const deleteTarget = ref(null)
+const deleting     = ref(false)
+const deleteError  = ref('')
+
+function openDeleteModal(row) {
+  deleteTarget.value = row
+  deleteError.value  = ''
+  deleteOpen.value   = true
+}
+
+async function confirmDelete() {
+  const id = deleteTarget.value?.court_id
+  if (!id) return
+  deleting.value    = true
+  deleteError.value = ''
+  try {
+    await store.removeCourt(id)
+    deleteOpen.value = false
+    deleteTarget.value = null
+    if (courts.value.length === 1 && currentPage.value > 1) currentPage.value--
+    loadCourts()
+  } catch (err) {
+    deleteError.value = extractErrorMessage(err)
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -420,6 +492,16 @@ onUnmounted(() => document.removeEventListener('keydown', onEscKey))
 </script>
 
 <style scoped>
+.error-banner {
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  color: #b91c1c;
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
 .btn-add {
   padding: 8px 18px;
   background: #15a982;
@@ -471,6 +553,17 @@ onUnmounted(() => document.removeEventListener('keydown', onEscKey))
   padding: 0;
 }
 .edit-link:hover { text-decoration: underline; }
+
+.delete-link {
+  color: var(--danger);
+  font-weight: 500;
+  font-size: 12px;
+  background: none;
+  padding: 0;
+}
+.delete-link:hover { text-decoration: underline; }
+
+.gap-xs { gap: 10px; }
 
 /* Modal */
 .modal-backdrop {
