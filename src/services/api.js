@@ -17,7 +17,10 @@ async function loadAuth() {
 }
 
 async function rawRequest(path, opts, token) {
-  const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) }
+  // Skip Content-Type for FormData — browser sets it with the correct boundary
+  const headers = opts.body instanceof FormData
+    ? { ...(opts.headers || {}) }
+    : { 'Content-Type': 'application/json', ...(opts.headers || {}) }
   if (token) headers.Authorization = `Bearer ${token}`
   const resp = await fetch(`${BASE}${path}`, { ...opts, headers })
   const text = await resp.text()
@@ -50,9 +53,27 @@ export async function request(path, opts = {}, { skipAuth = false, retried = fal
 }
 
 export const apiGet  = (path, opts = {})       => request(path, { ...opts, method: 'GET' })
-export const apiPost = (path, body, opts = {}) => request(path, { ...opts, method: 'POST', body: JSON.stringify(body) })
-export const apiPut  = (path, body, opts = {}) => request(path, { ...opts, method: 'PUT',  body: JSON.stringify(body) })
+export const apiPost = (path, body, opts = {}) => request(path, { ...opts, method: 'POST', body: body instanceof FormData ? body : JSON.stringify(body) })
+export const apiPut  = (path, body, opts = {}) => request(path, { ...opts, method: 'PUT',  body: body instanceof FormData ? body : JSON.stringify(body) })
 export const apiDel  = (path, opts = {})       => request(path, { ...opts, method: 'DELETE' })
+
+export async function apiDownload(path, filename) {
+  const auth = await loadAuth()
+  const token = auth?.accessToken ?? null
+  const headers = {}
+  if (token) headers.Authorization = `Bearer ${token}`
+  const resp = await fetch(`${BASE}${path}`, { method: 'GET', headers })
+  if (!resp.ok) throw new ApiError({ status: resp.status, data: null })
+  const blob = await resp.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename || 'download'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
 
 export const apiPostPublic = (path, body, opts = {}) =>
   request(path, { ...opts, method: 'POST', body: JSON.stringify(body) }, { skipAuth: true })

@@ -1,31 +1,21 @@
-import {
-  letterTemplates as seedData,
-  caseTypes,
-  tocUsers,
-} from '@/mock/letterTemplatesData.js'
-
-let _templates = [...seedData]
+import { apiDel, apiDownload, apiGet, apiPost, apiPut } from '@/services/api.js'
 
 export const letterTemplatesService = {
-  getReferenceData: () => Promise.resolve({ caseTypes, tocUsers }),
-  getAll: () => Promise.resolve([..._templates]),
-  create: (payload) => {
-    const item = { letter_template_id: _uuid(), active: 1, ...payload }
-    _templates.push(item)
-    return Promise.resolve(item)
-  },
-  update: (id, payload) => {
-    const item = _templates.find(t => t.letter_template_id === id)
-    if (item) Object.assign(item, payload)
-    return Promise.resolve(item)
-  },
-  remove: (id) => {
-    const item = _templates.find(t => t.letter_template_id === id)
-    if (item) item.active = 0
-    return Promise.resolve()
-  },
-}
+  getAll: () =>
+    apiGet('/revp/templates/letters/?page_size=100').then(r => r.results ?? r),
 
-function _uuid() {
-  return crypto?.randomUUID?.() ?? 'id-' + Math.random().toString(16).slice(2)
+  getReferenceData: () =>
+    apiGet('/revp/templates/letters/reference-data/'),
+
+  create: (formData) =>
+    apiPost('/revp/templates/letters/create/', formData),
+
+  update: (id, formData) =>
+    apiPut(`/revp/templates/letters/${id}/`, formData),
+
+  remove: (id) =>
+    apiDel(`/revp/templates/letters/${id}/`),
+
+  downloadFile: (id, filename) =>
+    apiDownload(`/revp/templates/letters/${id}/file/`, filename),
 }
