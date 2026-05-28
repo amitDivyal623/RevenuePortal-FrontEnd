@@ -162,14 +162,37 @@
       <!-- Form content — hidden while detail is being fetched -->
       <div v-show="!detailLoading">
         <div class="grid-2">
-          <div class="form-group">
+          <div class="form-group station-name-group">
             <label class="form-label">Station Name <span class="req">*</span></label>
             <input
-              v-model.trim="form.station_name"
+              v-model="form.station_name"
               :disabled="modalMode === 'view'"
               maxlength="50"
-              placeholder="e.g. London King's Cross"
+              placeholder="Type station name or 3-letter CRS code, e.g. CBG"
+              autocomplete="off"
+              @input="onStationNameInput"
+              @keydown="onSuggestKey"
+              @focus="onStationNameFocus"
+              @blur="onStationNameBlur"
             />
+            <ul
+              v-if="modalMode === 'add' && suggestOpen && suggestions.length"
+              class="autocomplete-dropdown"
+            >
+              <li
+                v-for="(s, i) in suggestions"
+                :key="s.station_id"
+                :class="['autocomplete-item', { active: i === suggestActive }]"
+                @mousedown.prevent="pickSuggestion(s)"
+                @mouseenter="suggestActive = i"
+              >
+                {{ suggestLabel(s) }}
+              </li>
+            </ul>
+            <div
+              v-else-if="modalMode === 'add' && suggestLoading"
+              class="autocomplete-hint"
+            >Searching…</div>
             <span v-if="errors.station_name" class="form-error">{{ errors.station_name }}</span>
           </div>
 
@@ -297,6 +320,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import ConfirmDelete from '@/components/ConfirmDelete.vue'
 import { useAuthStore } from '@/store/auth.js'
+import { stationsService } from '@/services/stations.service.js'
 
 // ── Config ─────────────────────────────────────────────────────────────────────
 const STATIONS_API   = '/api/v1/revp/stations'
@@ -347,6 +371,98 @@ const blank = () => ({
 })
 const form   = reactive(blank())
 const errors = reactive({})
+
+// ── Add-Station auto-fill (typeahead on Station Name) ─────────────────────────
+// Queries the tenant's seeded revp_station master list and pre-fills CRS,
+// NLC, lat/long, ZAx/ZAy and order when the user picks a suggestion.
+const AUTO_FILL_DEBOUNCE_MS  = 250
+const AUTO_FILL_MIN_QUERY    = 2
+const AUTO_FILL_LIMIT        = 15
+const suggestions     = ref([])
+const suggestOpen     = ref(false)
+const suggestLoading  = ref(false)
+const suggestActive   = ref(-1)
+let suggestTimer = null
+let suggestSeq   = 0
+
+function closeSuggest() {
+  suggestOpen.value = false
+  suggestActive.value = -1
+}
+
+function onStationNameInput() {
+  if (modalMode.value !== 'add') return
+  const term = (form.station_name || '').trim()
+  if (suggestTimer) clearTimeout(suggestTimer)
+  if (term.length < AUTO_FILL_MIN_QUERY) {
+    suggestions.value = []
+    closeSuggest()
+    return
+  }
+  suggestTimer = setTimeout(async () => {
+    const mySeq = ++suggestSeq
+    suggestLoading.value = true
+    try {
+      const res = await stationsService.autocomplete(term, AUTO_FILL_LIMIT)
+      if (mySeq !== suggestSeq) return  // stale response — newer query in flight
+      suggestions.value = res?.results ?? []
+      suggestOpen.value = suggestions.value.length > 0
+      suggestActive.value = -1
+    } catch {
+      if (mySeq !== suggestSeq) return
+      suggestions.value = []
+      closeSuggest()
+    } finally {
+      if (mySeq === suggestSeq) suggestLoading.value = false
+    }
+  }, AUTO_FILL_DEBOUNCE_MS)
+}
+
+function pickSuggestion(s) {
+  form.station_name = s.station_name ?? ''
+  form.crs_code     = (s.crs_code ?? '').toUpperCase()
+  form.nlc_code     = s.nlc_code  ?? ''
+  form.latitude     = s.latitude  ?? ''
+  form.longitude    = s.longitude ?? ''
+  form.z_ax_cord    = s.z_ax_cord ?? ''
+  form.z_ay_cord    = s.z_ay_cord ?? ''
+  if (s.order != null) form.order = s.order
+  closeSuggest()
+}
+
+function onSuggestKey(e) {
+  if (!suggestOpen.value || suggestions.value.length === 0) return
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    suggestActive.value = (suggestActive.value + 1) % suggestions.value.length
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    suggestActive.value =
+      (suggestActive.value - 1 + suggestions.value.length) % suggestions.value.length
+  } else if (e.key === 'Enter' && suggestActive.value >= 0) {
+    e.preventDefault()
+    pickSuggestion(suggestions.value[suggestActive.value])
+  } else if (e.key === 'Escape') {
+    closeSuggest()
+  }
+}
+
+function onStationNameFocus() {
+  if (modalMode.value === 'add' && suggestions.value.length > 0) {
+    suggestOpen.value = true
+  }
+}
+
+function onStationNameBlur() {
+  // Delay so a mousedown on a suggestion can fire before the dropdown closes.
+  setTimeout(closeSuggest, 150)
+}
+
+function suggestLabel(s) {
+  const name = (s.station_name || '').toUpperCase()
+  const crs  = (s.crs_code || '').toUpperCase()
+  return crs ? `${name} - ${crs}` : name
+}
 
 // ── Computed ───────────────────────────────────────────────────────────────────
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
@@ -454,6 +570,12 @@ function reset() {
   Object.keys(errors).forEach(k => delete errors[k])
   modalError.value = ''
   detailLoading.value = false
+  suggestions.value = []
+  suggestOpen.value = false
+  suggestActive.value = -1
+  suggestLoading.value = false
+  if (suggestTimer) { clearTimeout(suggestTimer); suggestTimer = null }
+  suggestSeq++
 }
 
 function openAdd() {
@@ -626,6 +748,43 @@ onMounted(() => {
   cursor: pointer;
 }
 .flex-wrap { flex-wrap: wrap; }
+.station-name-group { position: relative; }
+.autocomplete-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin: 2px 0 0;
+  padding: 4px 0;
+  list-style: none;
+  background: #fff;
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: 6px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+  max-height: 260px;
+  overflow-y: auto;
+  z-index: 30;
+}
+.autocomplete-item {
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #111827;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+}
+.autocomplete-item.active,
+.autocomplete-item:hover { background: #f3f4f6; }
+.autocomplete-hint {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 2px;
+  font-size: 12px;
+  color: #6b7280;
+  padding: 4px 8px;
+}
 @media (max-width: 720px) {
   .grid-2 { grid-template-columns: 1fr; }
   .checkbox-list { grid-template-columns: 1fr; }

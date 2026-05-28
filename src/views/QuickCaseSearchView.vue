@@ -110,12 +110,25 @@
                 </button>
               </td>
             </tr>
-            <tr v-if="pagedRows.length === 0">
+            <tr v-if="loading">
+              <td colspan="12">
+                <div class="empty-state" style="padding:1.5rem 0;color:#6b7280;">Loading…</div>
+              </td>
+            </tr>
+            <tr v-else-if="loadError">
+              <td colspan="12">
+                <div class="empty-state">
+                  <p class="empty-state-title" style="color:#b91c1c">Failed to load cases</p>
+                  <p class="empty-state-desc">{{ loadError }}</p>
+                </div>
+              </td>
+            </tr>
+            <tr v-else-if="pagedRows.length === 0">
               <td colspan="12">
                 <div class="empty-state">
                   <div class="empty-state-icon">🔍</div>
                   <p class="empty-state-title">No matching cases</p>
-                  <p class="empty-state-desc">Try a different search term — case number, name, court ref or VRM.</p>
+                  <p class="empty-state-desc">Try a different search term — case number, offender name, or VRM.</p>
                 </div>
               </td>
             </tr>
@@ -130,112 +143,221 @@
         <button class="page-btn" :disabled="currentPage === totalPages" @click="currentPage++">Next ›</button>
       </div>
     </div>
+
+    <!--
+      Linked-cases modal — rich table layout matching the legacy
+      getLinkedCasesList popup. Header shows the searched case number,
+      the table lists the parent + every linked case with the same
+      columns Quick Search uses (offender / age / postcode / outstanding
+      / closure reason). Operator picks one via radio and clicks
+      OPEN SELECTED CASE to navigate there.
+    -->
+    <div v-if="linkedModalOpen" class="qcs-modal-backdrop" @click.self="linkedModalOpen = false">
+      <div class="qcs-modal-panel qcs-modal-wide" role="dialog" aria-modal="true" aria-labelledby="qcs-linked-title">
+        <div class="qcs-modal-head">
+          <h2 id="qcs-linked-title" class="qcs-modal-title">Linked Cases</h2>
+          <button type="button" class="qcs-modal-close" aria-label="Close" @click="linkedModalOpen = false">×</button>
+        </div>
+
+        <!-- Searched case header -->
+        <div class="qcs-searched-card">
+          <div class="qcs-searched-label">SEARCHED CASE</div>
+          <div class="qcs-searched-num">
+            {{ linkedModalParent ? linkedModalParent.caseNum : '' }}
+          </div>
+        </div>
+
+        <!-- Open Selected Case button -->
+        <div class="qcs-modal-actions">
+          <button
+            type="button"
+            class="btn-open"
+            :disabled="!linkedModalSelected"
+            @click="openSelectedLinkedCase"
+          >OPEN SELECTED CASE</button>
+        </div>
+
+        <div class="qcs-modal-body" style="padding: 0 18px 12px;">
+          <div v-if="linkedModalLoading" class="empty-state" style="padding:1.5rem 0;color:#6b7280;">Loading…</div>
+          <div v-else-if="linkedModalError" class="empty-state">
+            <p class="empty-state-title" style="color:#b91c1c">Failed to load linked cases</p>
+            <p class="empty-state-desc">{{ linkedModalError }}</p>
+          </div>
+          <div v-else-if="linkedModalRows.length === 0" class="empty-state">
+            <p class="empty-state-desc">No linked cases.</p>
+          </div>
+          <div v-else>
+            <div class="toolbar" style="margin-bottom:8px;">
+              <div class="flex items-center gap-sm">
+                <select v-model.number="linkedModalPerPage" class="rows-select"
+                        @change="linkedModalPage = 1">
+                  <option :value="10">10</option>
+                  <option :value="25">25</option>
+                  <option :value="50">50</option>
+                </select>
+                <span class="toolbar-text">records per page</span>
+              </div>
+            </div>
+
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th class="col-icon"></th>
+                    <th>Case Number</th>
+                    <th>Offence Date</th>
+                    <th>Type</th>
+                    <th>Status</th>
+                    <th>Offender</th>
+                    <th>Age</th>
+                    <th>Post Code</th>
+                    <th>Vehicle Registration</th>
+                    <th>Outstanding</th>
+                    <th>Closure Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in linkedModalPagedRows" :key="row.case_id"
+                      :class="{ 'row-selected': linkedModalSelected === row.case_id }">
+                    <td class="col-icon">
+                      <input type="radio" name="qcs-linked-pick"
+                             :value="row.case_id" v-model="linkedModalSelected"
+                             :aria-label="`Select ${row.caseNum}`" />
+                    </td>
+                    <td>
+                      <a href="#" class="link-cell" @click.prevent="openLinkedCase(row)">
+                        {{ row.caseNum }}
+                      </a>
+                    </td>
+                    <td class="text-light">{{ row.caseDT }}</td>
+                    <td><span class="badge badge-neutral">{{ row.code }}</span></td>
+                    <td><span :class="statusColor(row.statusDesc)">{{ row.statusDesc }}</span></td>
+                    <td>{{ row.title }} {{ row.FirstName }} {{ row.Surname }}</td>
+                    <td :class="ageClass(row)">{{ row.customer_age || 0 }}</td>
+                    <td>{{ row.PostCode }}</td>
+                    <td>{{ row.regNum }}</td>
+                    <td :class="outstandingCellClass(row)">£ {{ formatOutstanding(row) }}</td>
+                    <td class="text-light">{{ row.reason }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="pagination" v-if="linkedModalTotalPages > 1">
+              <span class="page-meta">
+                Showing {{ (linkedModalPage - 1) * linkedModalPerPage + 1 }}
+                to {{ Math.min(linkedModalPage * linkedModalPerPage, linkedModalRows.length) }}
+                of {{ linkedModalRows.length }} entries
+              </span>
+              <button class="page-btn" :disabled="linkedModalPage === 1"
+                      @click="linkedModalPage--">‹ Previous</button>
+              <button class="page-btn" :disabled="linkedModalPage === linkedModalTotalPages"
+                      @click="linkedModalPage++">Next ›</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="qcs-modal-foot">
+          <button type="button" class="btn-open" @click="linkedModalOpen = false">CLOSE</button>
+        </div>
+      </div>
+    </div>
   </AppLayout>
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { sanitizeString } from '@/utils/security.js'
+import { casesService } from '@/services/cases.service.js'
 
 const router = useRouter()
 function goToCase(caseid) {
   router.push({ name: 'case-details', params: { caseid } })
 }
 
-const surnames = ['DONNELLY', 'SMITH', 'PATEL', 'KHAN', 'CHEN', 'JOHNSON', 'WILLIAMS', 'BROWN']
-const firstNames = ['SORAYA', 'JOHN', 'RAVI', 'AISHA', 'LEI', 'MARK', 'OLIVIA', 'ETHAN']
-const titles = ['MISS', 'MR', 'MISS', 'MRS', 'MR', 'MR', 'MISS', 'MR']
-const types = ['PFN', 'UFN', 'PCN', 'MG11', 'MICS', 'FT']
-const statuses = ['Open', 'Closed', 'Under Appeal', 'Court Booked']
-const postcodes = ['WD18 7DN', 'SW1A 1AA', 'E14 5AB', 'NW1 6XE', 'CR0 2YR', 'M1 4BT']
-const closureReasons = ['', 'Paid in full', 'Withdrawn', 'Insufficient evidence', '']
+const searchTerm   = ref('')
+const appliedTerm  = ref('')
+const perPage      = ref(5)
+const currentPage  = ref(1)
+const sortKey      = ref('caseDT')
+const sortDir      = ref('desc')
+const selectedIds  = ref([])
+const lastUpdated  = ref(currentTime())
+const loading      = ref(false)
+const loadError    = ref('')
 
-const searchTerm = ref('')
-const appliedTerm = ref('')
-const perPage = ref(5)
-const currentPage = ref(1)
-const sortKey = ref('caseDT')
-const sortDir = ref('desc')
-const selectedIds = ref([])
-const lastUpdated = ref(currentTime())
+// Server-driven state — populated by loadResults() from the backend.
+// pagedRows is what the existing template iterates over (the field names
+// map to what the columns already bind: caseNum / caseDT / code / etc.).
+const pagedRows    = ref([])
+const totalRecords = ref(0)
 
 function currentTime() {
   const now = new Date()
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
 }
-function refresh() {
-  lastUpdated.value = currentTime()
+
+// Convert backend ISO date → DD/MM/YYYY for the existing table display.
+function fmtDate(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
 }
 
-const allRows = ref(Array.from({ length: 30 }, (_, i) => {
-  const dd = String((i % 28) + 1).padStart(2, '0')
-  const mm = String(((i % 12) + 1)).padStart(2, '0')
-  const yyyy = 2025 + (i % 2)
-  const type = types[i % types.length]
-  const status = statuses[i % statuses.length]
-  let amountDue = 0, amountPaid = 0
-  switch (i % 6) {
-    case 0: amountDue = 81.30;  amountPaid = 0;     break
-    case 1: amountDue = 50.00;  amountPaid = 50.00; break
-    case 2: amountDue = 120.00; amountPaid = 30.00; break
-    case 3: amountDue = 40.00;  amountPaid = 75.00; break
-    case 4: amountDue = 200.00; amountPaid = 0;     break
-    case 5: amountDue = 0;      amountPaid = 0;     break
-  }
-  let age = 25 + (i % 30)
-  if (i % 7 === 0) age = 16
-  if (i % 11 === 0) age = 0
+// Map a backend quick-search row → the camelCase shape the existing
+// template already uses (preserves all the existing colour rules).
+function mapRow(r) {
   return {
-    case_id: 10000 + i,
-    caseNum: `EMR/${type}/${String(122000 + i).padStart(6, '0')}`,
-    caseDT: `${dd}/${mm}/${yyyy}`,
-    code: type,
-    statusDesc: status,
-    title: titles[i % titles.length],
-    FirstName: firstNames[i % firstNames.length],
-    Surname: surnames[i % surnames.length],
-    customer_age: age,
-    PostCode: postcodes[i % postcodes.length],
-    regNum: i % 4 === 0 ? `AB${20 + (i % 20)} ${['XYZ','PQR','MNO','JKL'][i % 4]}` : '',
-    amountDue,
-    amountPaid,
-    reason: status === 'Closed' ? closureReasons[i % closureReasons.length] : '',
-    linked_case_count: i % 5 === 0 ? (i % 7) : 0
+    case_id:          r.case_id,
+    caseNum:          r.case_num,
+    caseDT:           fmtDate(r.case_dt),
+    code:             r.case_type_code,
+    statusDesc:       r.case_status_desc,
+    title:            r.title,
+    FirstName:        r.first_name,
+    Surname:          r.surname,
+    customer_age:     r.customer_age,
+    PostCode:         r.post_code,
+    regNum:           r.reg_num,
+    amountDue:        r.amount_due  || 0,
+    amountPaid:       r.amount_paid || 0,
+    reason:           r.closure_reason,
+    linked_case_count: r.linked_case_count || 0,
+    // Array of {case_id, case_num} — drives the linked-cases modal when
+    // the pill is clicked. Matches legacy linkedCaseData layout.
+    linked_cases:     Array.isArray(r.linked_cases) ? r.linked_cases : [],
   }
-}))
+}
 
-const filteredRows = computed(() => {
-  const q = appliedTerm.value.toLowerCase()
-  let rows = allRows.value
-  if (q) {
-    rows = rows.filter(r =>
-      r.caseNum.toLowerCase().includes(q) ||
-      r.FirstName.toLowerCase().includes(q) ||
-      r.Surname.toLowerCase().includes(q) ||
-      (r.regNum && r.regNum.toLowerCase().includes(q)) ||
-      (r.PostCode && r.PostCode.toLowerCase().includes(q))
-    )
+async function loadResults() {
+  loading.value = true
+  loadError.value = ''
+  try {
+    const resp = await casesService.quickSearch({
+      term:     appliedTerm.value,
+      page:     currentPage.value,
+      pageSize: perPage.value,
+    })
+    pagedRows.value    = (resp.results || []).map(mapRow)
+    totalRecords.value = resp.total ?? pagedRows.value.length
+    lastUpdated.value  = currentTime()
+  } catch (err) {
+    loadError.value = err?.data?.detail || err?.message || 'Failed to load cases.'
+    pagedRows.value = []
+    totalRecords.value = 0
+  } finally {
+    loading.value = false
   }
-  return [...rows].sort((a, b) => {
-    const mul = sortDir.value === 'asc' ? 1 : -1
-    if (sortKey.value === 'outstanding') {
-      const av = a.amountDue - a.amountPaid
-      const bv = b.amountDue - b.amountPaid
-      return av > bv ? mul : -mul
-    }
-    const av = a[sortKey.value] ?? ''
-    const bv = b[sortKey.value] ?? ''
-    return av > bv ? mul : -mul
-  })
-})
+}
 
-const totalRecords = computed(() => filteredRows.value.length)
+function refresh() { loadResults() }
+
 const totalPages = computed(() => Math.max(1, Math.ceil(totalRecords.value / perPage.value)))
 const rangeStart = computed(() => totalRecords.value === 0 ? 0 : (currentPage.value - 1) * perPage.value + 1)
-const rangeEnd = computed(() => Math.min(currentPage.value * perPage.value, totalRecords.value))
-const pagedRows = computed(() => filteredRows.value.slice(rangeStart.value - 1, rangeEnd.value))
+const rangeEnd   = computed(() => Math.min(currentPage.value * perPage.value, totalRecords.value))
 
 const pageNumbers = computed(() => {
   const total = totalPages.value, cur = currentPage.value
@@ -250,11 +372,29 @@ function applySearch() {
   appliedTerm.value = sanitizeString(searchTerm.value)
   currentPage.value = 1
   selectedIds.value = []
+  loadResults()
 }
+
+// Watch page / page size so the table refetches when the user changes them.
+watch(currentPage, () => loadResults())
+watch(perPage,    () => { currentPage.value = 1; loadResults() })
 
 function sort(key) {
   if (sortKey.value === key) sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
   else { sortKey.value = key; sortDir.value = 'asc' }
+  // Client-side sort the visible page — server returns sorted by -case_dt
+  // by default. Full server-side sort allowlist can come in a follow-up.
+  const mul = sortDir.value === 'asc' ? 1 : -1
+  pagedRows.value = [...pagedRows.value].sort((a, b) => {
+    if (sortKey.value === 'outstanding') {
+      const av = a.amountDue - a.amountPaid
+      const bv = b.amountDue - b.amountPaid
+      return av > bv ? mul : -mul
+    }
+    const av = a[sortKey.value] ?? ''
+    const bv = b[sortKey.value] ?? ''
+    return av > bv ? mul : -mul
+  })
 }
 function sortByOutstanding() { sort('outstanding') }
 function sortIcon(key) { return sortKey.value === key ? (sortDir.value === 'asc' ? '↑' : '↓') : '' }
@@ -267,21 +407,84 @@ function toggleAll() {
   if (allSelected.value) selectedIds.value = []
   else selectedIds.value = pagedRows.value.map(r => r.case_id)
 }
-const allSelected = computed(() => pagedRows.value.length > 0 && pagedRows.value.every(r => selectedIds.value.includes(r.case_id)))
+const allSelected  = computed(() => pagedRows.value.length > 0 && pagedRows.value.every(r => selectedIds.value.includes(r.case_id)))
 const someSelected = computed(() => selectedIds.value.length > 0 && !allSelected.value)
 
 function openSelected() {
-  if (selectedIds.value.length === 1) {
+  // Legacy OPEN SELECTED CASE always opens the first checked row.
+  if (selectedIds.value.length >= 1) {
     goToCase(selectedIds.value[0])
   }
 }
 
-function openLinked(row) {
-  void row
+// Linked-cases modal — rich table version. Opens on pill click, fetches
+// /linked-detail/ which returns {parent, linked:[...]} with all the columns
+// the legacy modal renders (offender / age / postcode / outstanding / etc.).
+// Mirrors legacy `getLinkedCasesList` (caseaction.cfm:5454).
+const linkedModalOpen     = ref(false)
+const linkedModalLoading  = ref(false)
+const linkedModalError    = ref('')
+const linkedModalParent   = ref(null)
+const linkedModalRows     = ref([])         // rendered rows: parent first, then linked
+const linkedModalSelected = ref('')         // case_id of the currently checked radio
+const linkedModalPerPage  = ref(50)
+const linkedModalPage     = ref(1)
+
+const linkedModalPagedRows = computed(() => {
+  const start = (linkedModalPage.value - 1) * linkedModalPerPage.value
+  return linkedModalRows.value.slice(start, start + linkedModalPerPage.value)
+})
+const linkedModalTotalPages = computed(() =>
+  Math.max(1, Math.ceil(linkedModalRows.value.length / linkedModalPerPage.value)),
+)
+
+async function openLinked(row) {
+  if (!row || !row.case_id) return
+  if (!row.linked_case_count) return     // pill is disabled in this case anyway
+  linkedModalOpen.value     = true
+  linkedModalLoading.value  = true
+  linkedModalError.value    = ''
+  linkedModalParent.value   = null
+  linkedModalRows.value     = []
+  linkedModalSelected.value = ''
+  linkedModalPage.value     = 1
+  try {
+    const data = await casesService.getLinkedDetail(row.case_id)
+    // Map both parent + linked through the same shape function so the
+    // table iteration is uniform. The parent flag drives the row badge.
+    const mapped = []
+    if (data?.parent) mapped.push({ ...mapRow(data.parent), is_parent: true })
+    for (const l of (data?.linked || [])) mapped.push({ ...mapRow(l), is_parent: false })
+    linkedModalRows.value   = mapped
+    linkedModalParent.value = mapped[0] || null
+    // Pre-select the parent so OPEN SELECTED CASE is immediately usable.
+    if (mapped[0]) linkedModalSelected.value = mapped[0].case_id
+  } catch (err) {
+    linkedModalError.value =
+      err?.data?.detail || err?.message || 'Failed to load linked cases.'
+  } finally {
+    linkedModalLoading.value = false
+  }
 }
 
-function outstandingValue(row) { return row.amountDue - row.amountPaid }
+function openSelectedLinkedCase() {
+  if (!linkedModalSelected.value) return
+  linkedModalOpen.value = false
+  goToCase(linkedModalSelected.value)
+}
+
+function openLinkedCase(row) {
+  if (!row?.case_id) return
+  linkedModalOpen.value = false
+  goToCase(row.case_id)
+}
+
+function outstandingValue(row) { return (row.amountDue || 0) - (row.amountPaid || 0) }
 function formatOutstanding(row) { return Math.abs(outstandingValue(row)).toFixed(2) }
+
+// Fire the initial load on mount — legacy quick-search lands on an empty
+// term and shows the most recent cases for the TOC; we match that.
+onMounted(loadResults)
 
 function outstandingCellClass(row) {
   const v = outstandingValue(row)
@@ -407,4 +610,73 @@ function statusColor(status) {
 :deep(table) { font-size: 12px; }
 :deep(thead th) { padding: 10px 12px 10px 0; }
 :deep(tbody td) { padding: 11px 12px 11px 0; }
+
+/* Linked-cases modal — small, plain panel; mirrors legacy hover-box layout. */
+.qcs-modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 60;
+}
+.qcs-modal-panel {
+  background: #fff;
+  border-radius: 8px;
+  width: 420px;
+  max-width: 90vw;
+  max-height: 80vh;
+  display: flex; flex-direction: column;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+}
+/* The linked-cases modal needs a wide layout to fit the legacy column set. */
+.qcs-modal-wide {
+  width: 1200px;
+  max-width: 95vw;
+  max-height: 90vh;
+}
+.qcs-searched-card {
+  margin: 12px 18px 0;
+  padding: 14px 18px;
+  background: var(--bg-hover, #f5f6fa);
+  border-radius: 6px;
+}
+.qcs-searched-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.qcs-searched-num {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-strong);
+  margin-top: 4px;
+}
+.qcs-modal-actions {
+  padding: 12px 18px 0;
+  display: flex;
+  justify-content: flex-end;
+}
+.qcs-modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 18px; border-bottom: 1px solid var(--border);
+}
+.qcs-modal-title { font-size: 15px; font-weight: 700; margin: 0; }
+.qcs-modal-subtitle { font-size: 12px; color: var(--text-muted); font-weight: 400; margin-left: 6px; }
+.qcs-modal-close {
+  width: 28px; height: 28px;
+  font-size: 20px; line-height: 1; color: var(--text-muted);
+  background: none; border: none; cursor: pointer;
+}
+.qcs-modal-close:hover { color: var(--text-strong); }
+.qcs-modal-body { padding: 14px 18px; overflow-y: auto; flex: 1; }
+.qcs-modal-foot { padding: 10px 18px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; }
+.qcs-linked-list { list-style: none; margin: 0; padding: 0; }
+.qcs-linked-list li { padding: 6px 0; }
+.qcs-linked-link {
+  color: var(--primary);
+  font-weight: 600;
+  text-decoration: none;
+  font-size: 13px;
+}
+.qcs-linked-link:hover { text-decoration: underline; }
 </style>

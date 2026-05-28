@@ -20,16 +20,52 @@
       <div v-show="basicOpen" class="basic-body">
         <div class="form-row-left">
           <label class="form-label-left">Case Type<span class="req">*</span></label>
-          <select v-model="form.caseType">
-            <option value="">Please select Case</option>
-            <option v-for="t in caseTypes" :key="t" :value="t">{{ t }}</option>
-          </select>
+          <div class="field-cell">
+            <select v-model="form.caseTypeId" :disabled="caseTypesLoading">
+              <option value="">
+                {{ caseTypesLoading ? 'Loading…' : 'Please select Case' }}
+              </option>
+              <option v-for="t in caseTypes" :key="t.case_type_id" :value="t.case_type_id" :title="t.description">
+                {{ t.code }}{{ t.description ? ' — ' + t.description : '' }}
+              </option>
+            </select>
+            <span v-if="caseTypesError" class="form-error" role="alert">{{ caseTypesError }}</span>
+          </div>
 
           <label class="form-label-left">Offence Date<span class="req">*</span></label>
           <input v-model="form.offenceDate" type="date" />
 
           <label class="form-label-left">Case Issuer<span class="req">*</span></label>
-          <input v-model="form.caseIssuer" type="text" placeholder="Case Issuer" maxlength="100" />
+          <div class="field-cell">
+            <div class="autocomplete" ref="issuerAcRef">
+              <input
+                v-model="caseIssuerSearch"
+                type="text"
+                :placeholder="caseIssuersLoading ? 'Loading…' : 'Type to search Case Issuer'"
+                autocomplete="off"
+                spellcheck="false"
+                maxlength="100"
+                @focus="caseIssuerOpen = true"
+                @input="onIssuerInput"
+              />
+              <div v-if="caseIssuerOpen && !caseIssuersLoading" class="autocomplete-dropdown">
+                <button
+                  v-for="u in filteredIssuers"
+                  :key="u.user_id"
+                  type="button"
+                  class="autocomplete-item"
+                  :class="{ active: u.user_id === form.caseIssuerId }"
+                  @mousedown.prevent="selectIssuer(u)"
+                >
+                  {{ formatIssuer(u) }}
+                </button>
+                <div v-if="filteredIssuers.length === 0" class="autocomplete-empty">
+                  No matches.
+                </div>
+              </div>
+            </div>
+            <span v-if="caseIssuersError" class="form-error" role="alert">{{ caseIssuersError }}</span>
+          </div>
         </div>
 
         <div class="manual-ref-row">
@@ -50,16 +86,37 @@
     <div class="card card-padded tab-pane">
       <!-- CUSTOMER DETAILS -->
       <div v-show="activeTab === 'customer'">
+        <!--
+          Existing-customer link banner. Appears when the user has picked
+          a match from the PERFORM ADDRESS SEARCH modal. On submit the chain
+          will reuse this customer_id instead of creating a new customer row.
+        -->
+        <div v-if="linkedCustomerName" class="linked-customer-banner" role="status">
+          <span>
+            <strong>Linked to existing customer:</strong> {{ linkedCustomerName }}.
+            A new case will be added to their record (no duplicate customer created).
+          </span>
+          <button type="button" class="link-unlink-btn" @click="unlinkCustomer">
+            Unlink &amp; create new customer instead
+          </button>
+        </div>
         <div class="two-col">
           <fieldset class="legend-group">
             <legend>Customer</legend>
 
             <div class="form-row-left">
               <label class="form-label-left">Title</label>
-              <select v-model="form.title">
-                <option value="">Please Select Title</option>
-                <option v-for="t in titles" :key="t" :value="t">{{ t }}</option>
-              </select>
+              <div class="field-cell">
+                <select v-model="form.titleId" :disabled="titlesLoading">
+                  <option value="">
+                    {{ titlesLoading ? 'Loading…' : 'Please Select Title' }}
+                  </option>
+                  <option v-for="t in titles" :key="t.lookup_data_id" :value="t.lookup_data_id">
+                    {{ t.value }}
+                  </option>
+                </select>
+                <span v-if="titlesError" class="form-error" role="alert">{{ titlesError }}</span>
+              </div>
 
               <label class="form-label-left">First name</label>
               <input v-model="form.firstName" type="text" maxlength="50" />
@@ -68,10 +125,21 @@
               <input v-model="form.lastName" type="text" maxlength="50" />
 
               <label class="form-label-left">Date of Birth</label>
-              <input v-model="form.dob" type="date" />
+              <input
+                v-model="form.dob"
+                type="date"
+                :max="dobMaxDate"
+                min="1900-01-01"
+              />
 
               <label class="form-label-left">Age</label>
-              <input v-model.number="form.age" type="number" min="0" max="120" />
+              <input
+                :value="computedAge"
+                type="number"
+                readonly
+                placeholder="(auto from DOB)"
+                class="field-readonly"
+              />
 
               <label class="form-label-left">Gender</label>
               <div class="radio-row">
@@ -90,10 +158,17 @@
               <input v-model="form.email" type="email" maxlength="100" />
 
               <label class="form-label-left">Employment Status</label>
-              <select v-model="form.employmentStatus">
-                <option value="">Please Select</option>
-                <option v-for="e in employmentStatuses" :key="e" :value="e">{{ e }}</option>
-              </select>
+              <div class="field-cell">
+                <select v-model="form.employmentStatusId" :disabled="employmentLoading">
+                  <option value="">
+                    {{ employmentLoading ? 'Loading…' : 'Please Select' }}
+                  </option>
+                  <option v-for="e in employmentStatuses" :key="e.lookup_data_id" :value="e.lookup_data_id">
+                    {{ e.value }}
+                  </option>
+                </select>
+                <span v-if="employmentError" class="form-error" role="alert">{{ employmentError }}</span>
+              </div>
 
               <label class="form-label-left">Parent/Guardian</label>
               <input v-model="form.parentGuardian" type="text" maxlength="100" />
@@ -107,9 +182,25 @@
               <legend>Address</legend>
               <div class="form-row-left">
                 <label class="form-label-left">Postcode</label>
-                <div class="input-with-icon">
-                  <input v-model="form.postcode" type="text" placeholder="Postcode" maxlength="20" />
-                  <span class="help-icon" title="Postcode lookup">?</span>
+                <div class="field-cell">
+                  <div class="input-with-icon">
+                    <input
+                      v-model="form.postcode"
+                      type="text"
+                      placeholder="Postcode"
+                      maxlength="20"
+                      @keyup.enter.prevent="performAddressSearch"
+                    />
+                    <button
+                      type="button"
+                      class="help-icon"
+                      title="Search addresses for this postcode"
+                      :disabled="addressLookupLoading"
+                      @click="performAddressSearch"
+                    >?</button>
+                  </div>
+                  <span v-if="addressLookupError" class="form-error" role="alert">{{ addressLookupError }}</span>
+                  <span v-else-if="addressLookupInfo" class="form-info" role="status">{{ addressLookupInfo }}</span>
                 </div>
 
                 <label class="form-label-left">Address 1</label>
@@ -122,19 +213,30 @@
                 <input v-model="form.town" type="text" placeholder="Town" maxlength="100" />
               </div>
               <div class="flex gap-sm mt-md" style="justify-content: space-between">
-                <button class="btn-action-green" @click="enterAddressSearchReference">ENTER ADDRESS SEARCH REFERENCE</button>
-                <button class="btn-action-green" @click="performAddressSearch">PERFORM ADDRESS SEARCH</button>
+                <button class="btn-action-green" @click="openAddressReferenceModal">ENTER ADDRESS SEARCH REFERENCE</button>
+                <button class="btn-action-green" @click="openOffenderSearchModal">PERFORM ADDRESS SEARCH</button>
               </div>
+              <p v-if="form.addressSearchReference" class="ref-pill">
+                Address reference: <strong>{{ form.addressSearchReference }}</strong>
+                <button type="button" class="ref-clear" title="Clear" @click="form.addressSearchReference = ''">×</button>
+              </p>
             </fieldset>
 
             <fieldset class="legend-group">
               <legend>Manual Verification</legend>
               <div class="form-row-left">
                 <label class="form-label-left">Verification Type</label>
-                <select v-model="form.verificationType">
-                  <option value="">Please Select Verification Type</option>
-                  <option v-for="v in verificationTypes" :key="v" :value="v">{{ v }}</option>
-                </select>
+                <div class="field-cell">
+                  <select v-model="form.verificationTypeId" :disabled="verificationLoading">
+                    <option value="">
+                      {{ verificationLoading ? 'Loading…' : 'Please Select Verification Type' }}
+                    </option>
+                    <option v-for="v in verificationTypes" :key="v.lookup_data_id" :value="v.lookup_data_id">
+                      {{ v.value }}
+                    </option>
+                  </select>
+                  <span v-if="verificationError" class="form-error" role="alert">{{ verificationError }}</span>
+                </div>
 
                 <label class="form-label-left">Verification Notes</label>
                 <input v-model="form.verificationNotes" type="text" placeholder="Verification Note" maxlength="200" />
@@ -147,7 +249,7 @@
                 <label class="form-label-left">Customer Signature</label>
                 <select v-model="form.customerSignature">
                   <option value="">Please select an option</option>
-                  <option v-for="s in signatureOptions" :key="s" :value="s">{{ s }}</option>
+                  <option v-for="s in signatureOptions" :key="s.value" :value="s.value">{{ s.label }}</option>
                 </select>
               </div>
             </fieldset>
@@ -155,18 +257,106 @@
         </div>
       </div>
 
-      <!-- JOURNEY DETAILS -->
-      <div v-show="activeTab === 'journey'">
+      <!-- CAR PARK DETAILS — shown in place of journey when case type is PCN.
+           Mirrors legacy caseaction.cfm:608 — a PCN case writes a
+           revp_vehicle_details row instead of revp_journey_details. -->
+      <div v-show="activeTab === 'journey' && isPcnCase">
+        <div class="two-col">
+          <div class="form-row-left">
+            <label class="form-label-left">Vehicle Reg<span class="req">*</span></label>
+            <input v-model.trim="form.vehicleReg" type="text" maxlength="12" placeholder="e.g. AB12 XYZ" style="text-transform:uppercase"
+                   @input="form.vehicleReg = form.vehicleReg.toUpperCase()" />
+
+            <label class="form-label-left">Colour</label>
+            <input v-model.trim="form.vehicleColour" type="text" maxlength="20" placeholder="e.g. Silver" />
+
+            <label class="form-label-left">Make</label>
+            <input v-model.trim="form.vehicleMake" type="text" maxlength="20" placeholder="e.g. Ford" />
+
+            <label class="form-label-left">Model</label>
+            <input v-model.trim="form.vehicleModel" type="text" maxlength="30" placeholder="e.g. Focus" />
+
+            <label class="form-label-left">Issue Reason</label>
+            <input v-model.trim="form.carparkIssueReason" type="text" maxlength="50" placeholder="Reason for the PCN" />
+
+            <label class="form-label-left">Carpark Details</label>
+            <textarea v-model="form.carparkDetails" rows="3" maxlength="1000" placeholder="Notes about the location / circumstances"></textarea>
+          </div>
+
+          <div class="form-row-left">
+            <label class="form-label-left">Offence From (time)</label>
+            <input v-model="form.offenceFromTime" type="time" />
+
+            <label class="form-label-left">Offence To (time)</label>
+            <input v-model="form.offenceToTime" type="time" />
+
+            <label class="form-label-left">Pay-Display Ticket Number</label>
+            <input v-model.trim="form.payDisplayTicketNum" type="text" maxlength="45" />
+
+            <label class="form-label-left">Pay-Display Expiry (time)</label>
+            <input v-model="form.payDisplayTicketExpiry" type="time" />
+          </div>
+        </div>
+      </div>
+
+      <!-- JOURNEY DETAILS — hidden when PCN case type is selected.
+           Legacy parity: a PCN case has no journey row, an MG11/PFN/UFN
+           case has no vehicle row — never both. -->
+      <div v-show="activeTab === 'journey' && !isPcnCase">
         <div class="two-col">
           <div class="form-row-left">
             <label class="form-label-left">Place</label>
             <input v-model="form.place" type="text" placeholder="Place" maxlength="100" />
 
             <label class="form-label-left">Journey From</label>
-            <input v-model="form.journeyFrom" type="text" placeholder="Journey From" maxlength="100" />
+            <div class="autocomplete" ref="journeyFromAcRef">
+              <input
+                v-model="form.journeyFrom"
+                type="text"
+                placeholder="Journey From — name or 3-letter CRS"
+                autocomplete="off"
+                spellcheck="false"
+                maxlength="100"
+                @input="onJourneyFromInput"
+                @focus="onJourneyFromFocus"
+              />
+              <div v-if="journeyFromOpen && journeyFromSuggestions.length" class="autocomplete-dropdown">
+                <button
+                  v-for="s in journeyFromSuggestions"
+                  :key="s.station_id"
+                  type="button"
+                  class="autocomplete-item"
+                  @mousedown.prevent="selectJourneyFrom(s)"
+                >
+                  {{ stationLabel(s) }}
+                </button>
+              </div>
+            </div>
 
             <label class="form-label-left">Journey To</label>
-            <input v-model="form.journeyTo" type="text" placeholder="Journey To" maxlength="100" />
+            <div class="autocomplete" ref="journeyToAcRef">
+              <input
+                v-model="form.journeyTo"
+                type="text"
+                placeholder="Journey To — name or 3-letter CRS"
+                autocomplete="off"
+                spellcheck="false"
+                maxlength="100"
+                @input="onJourneyToInput"
+                @focus="onJourneyToFocus"
+              />
+              <div v-if="journeyToOpen && journeyToSuggestions.length" class="autocomplete-dropdown">
+                <button
+                  v-for="s in journeyToSuggestions"
+                  :key="s.station_id"
+                  type="button"
+                  class="autocomplete-item"
+                  @mousedown.prevent="selectJourneyTo(s)"
+                >
+                  {{ stationLabel(s) }}
+                </button>
+              </div>
+            </div>
 
             <label class="form-label-left">Time &amp; Date of Travel</label>
             <input v-model="form.timeDateOfTravel" type="datetime-local" />
@@ -218,7 +408,11 @@
               <tr v-for="n in notes" :key="n.id">
                 <td>{{ n.datetime }}</td>
                 <td>{{ n.author }}</td>
-                <td>{{ n.note }}</td>
+                <td>
+                  {{ n.note }}
+                  <button type="button" class="btn-action-red" style="margin-left:8px;padding:2px 8px;font-size:11px;"
+                          @click="removeQueuedNote(n.id)">REMOVE</button>
+                </td>
               </tr>
               <tr v-if="notes.length === 0">
                 <td colspan="3">
@@ -290,41 +484,645 @@
       </div>
     </div>
 
-    <!-- ADD THIS CASE button -->
+    <!-- Submit banner + ADD THIS CASE button -->
+    <div v-if="submitError" class="submit-banner submit-banner-error" role="alert">
+      {{ submitError }}
+    </div>
+    <div v-if="submitSuccess" class="submit-banner submit-banner-success" role="status">
+      {{ submitSuccess }}
+    </div>
     <div class="flex" style="justify-content: flex-end; margin-top: 16px">
-      <button class="btn-add-case" @click="addThisCase">ADD THIS CASE</button>
+      <button
+        class="btn-add-case"
+        :disabled="submitting"
+        @click="addThisCase"
+      >{{ submitting ? 'SAVING…' : 'ADD THIS CASE' }}</button>
+    </div>
+
+    <!-- Offender Description modal (ADD DESCRIPTION button) -->
+    <div v-if="descriptionModalOpen" class="modal-backdrop" @click.self="cancelDescription">
+      <div class="modal-panel modal-panel-wide" role="dialog" aria-modal="true" aria-labelledby="desc-modal-title">
+        <div class="modal-head">
+          <h2 id="desc-modal-title" class="modal-title">Offender Description</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="cancelDescription">×</button>
+        </div>
+        <div class="modal-body desc-modal-body">
+          <!-- LEFT column: dropdowns + text + 2 checkboxes -->
+          <div class="desc-col">
+            <div class="desc-row">
+              <label class="desc-label">Body Camera</label>
+              <select v-model="form.description.bodyCamera">
+                <option value="0">No</option>
+                <option value="1">Yes</option>
+              </select>
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Build</label>
+              <select v-model="form.description.build" :disabled="descLookups.build.loading">
+                <option value="">{{ descLookups.build.loading ? 'Loading…' : 'Please Select' }}</option>
+                <option v-for="o in descLookups.build.items" :key="o.lookup_data_id" :value="o.lookup_data_id">{{ o.value }}</option>
+              </select>
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Hair Color</label>
+              <select v-model="form.description.hairColor" :disabled="descLookups.hairColor.loading">
+                <option value="">{{ descLookups.hairColor.loading ? 'Loading…' : 'Please Select' }}</option>
+                <option v-for="o in descLookups.hairColor.items" :key="o.lookup_data_id" :value="o.lookup_data_id">{{ o.value }}</option>
+              </select>
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Other Hair Color</label>
+              <input v-model="form.description.otherHairColor" type="text" maxlength="100" />
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Hair Type</label>
+              <select v-model="form.description.hairType" :disabled="descLookups.hairType.loading">
+                <option value="">{{ descLookups.hairType.loading ? 'Loading…' : 'Please Select' }}</option>
+                <option v-for="o in descLookups.hairType.items" :key="o.lookup_data_id" :value="o.lookup_data_id">{{ o.value }}</option>
+              </select>
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Eye Color</label>
+              <select v-model="form.description.eyeColor" :disabled="descLookups.eyeColor.loading">
+                <option value="">{{ descLookups.eyeColor.loading ? 'Loading…' : 'Please Select' }}</option>
+                <option v-for="o in descLookups.eyeColor.items" :key="o.lookup_data_id" :value="o.lookup_data_id">{{ o.value }}</option>
+              </select>
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Other Eye Color</label>
+              <input v-model="form.description.otherEyeColor" type="text" maxlength="100" />
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Ethnic Appearance</label>
+              <input v-model="form.description.ethnicAppearance" type="text" maxlength="100" />
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Ethnicity</label>
+              <select v-model="form.description.ethnicity" :disabled="descLookups.ethnicity.loading">
+                <option value="">{{ descLookups.ethnicity.loading ? 'Loading…' : 'Please Select' }}</option>
+                <option v-for="o in descLookups.ethnicity.items" :key="o.lookup_data_id" :value="o.lookup_data_id">{{ o.value }}</option>
+              </select>
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Facial Hair Type</label>
+              <select v-model="form.description.facialHairType" :disabled="descLookups.facialHairType.loading">
+                <option value="">{{ descLookups.facialHairType.loading ? 'Loading…' : 'Please Select' }}</option>
+                <option v-for="o in descLookups.facialHairType.items" :key="o.lookup_data_id" :value="o.lookup_data_id">{{ o.value }}</option>
+              </select>
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Other Facial Hair Type</label>
+              <input v-model="form.description.otherFacialHairType" type="text" maxlength="100" />
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Height</label>
+              <input v-model="form.description.height" type="text" maxlength="50" />
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Handed</label>
+              <select v-model="form.description.handed" :disabled="descLookups.handed.loading">
+                <option value="">{{ descLookups.handed.loading ? 'Loading…' : 'Please Select' }}</option>
+                <option v-for="o in descLookups.handed.items" :key="o.lookup_data_id" :value="o.lookup_data_id">{{ o.value }}</option>
+              </select>
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Glasses</label>
+              <select v-model="form.description.glasses" :disabled="descLookups.glasses.loading">
+                <option value="">{{ descLookups.glasses.loading ? 'Loading…' : 'Please Select' }}</option>
+                <option v-for="o in descLookups.glasses.items" :key="o.lookup_data_id" :value="o.lookup_data_id">{{ o.value }}</option>
+              </select>
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Bracelet</label>
+              <input v-model="form.description.bracelet" type="checkbox" />
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Necklace</label>
+              <input v-model="form.description.necklace" type="checkbox" />
+            </div>
+          </div>
+
+          <!-- RIGHT column: jewellery checkboxes + descriptive text -->
+          <div class="desc-col">
+            <div class="desc-row">
+              <label class="desc-label">Watch</label>
+              <input v-model="form.description.watch" type="checkbox" />
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Brooch</label>
+              <input v-model="form.description.brooch" type="checkbox" />
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Pin</label>
+              <input v-model="form.description.pin" type="checkbox" />
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Pendant</label>
+              <input v-model="form.description.pendant" type="checkbox" />
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Earrings</label>
+              <input v-model="form.description.earrings" type="checkbox" />
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Ring</label>
+              <input v-model="form.description.ring" type="checkbox" />
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Other</label>
+              <input v-model="form.description.other" type="checkbox" />
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Jewellery Description</label>
+              <input v-model="form.description.jewelleryDescription" type="text" maxlength="200" />
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Marks &amp; Scars</label>
+              <input v-model="form.description.marksAndScars" type="text" maxlength="200" />
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Tatoos</label>
+              <input v-model="form.description.tatoos" type="text" maxlength="200" />
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Complexion</label>
+              <input v-model="form.description.complexion" type="text" maxlength="100" />
+            </div>
+            <div class="desc-row">
+              <label class="desc-label">Habitual Dress</label>
+              <input v-model="form.description.habitualDress" type="text" maxlength="200" />
+            </div>
+            <div class="desc-row desc-row-textarea">
+              <label class="desc-label">Additional Description</label>
+              <textarea v-model="form.description.additionalDescription" rows="4" maxlength="2000"></textarea>
+            </div>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn-action-red" @click="cancelDescription">CANCEL</button>
+          <button type="button" class="btn-action-green" @click="saveDescription">NEXT</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Address Search Reference modal (legacy: stores a reference id from an external address service) -->
+    <div v-if="referenceModalOpen" class="modal-backdrop" @click.self="cancelReferenceModal">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="ref-modal-title">
+        <div class="modal-head">
+          <h2 id="ref-modal-title" class="modal-title">Address search</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="cancelReferenceModal">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-row-left">
+            <label class="form-label-left" for="ref-input">Enter Address Search Reference</label>
+            <input
+              id="ref-input"
+              v-model="referenceInput"
+              type="text"
+              placeholder="Enter"
+              maxlength="45"
+              @keyup.enter="saveReferenceModal"
+            />
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn-action-red" @click="cancelReferenceModal">CANCEL</button>
+          <button type="button" class="btn-action-green" @click="saveReferenceModal">SAVE</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Perform Address Search modal — offender history / duplicate check -->
+    <div v-if="offenderSearchOpen" class="modal-backdrop" @click.self="closeOffenderSearchModal">
+      <div class="modal-panel modal-panel-wide" role="dialog" aria-modal="true" aria-labelledby="off-modal-title">
+        <div class="modal-head">
+          <h2 id="off-modal-title" class="modal-title">Address / Offender Search</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="closeOffenderSearchModal">×</button>
+        </div>
+        <div class="modal-body offender-search-body">
+          <div class="offender-search-left">
+            <fieldset class="legend-group">
+              <legend>Offender Name</legend>
+              <div class="form-row-left">
+                <label class="form-label-left">First Name</label>
+                <input v-model="offSearch.firstName" type="text" placeholder="First Name" maxlength="50" />
+                <label class="form-label-left">Middle Name</label>
+                <input v-model="offSearch.middleName" type="text" placeholder="Middle Name" maxlength="50" />
+                <label class="form-label-left">Last Name</label>
+                <input v-model="offSearch.lastName" type="text" placeholder="Last Name" maxlength="50" />
+              </div>
+            </fieldset>
+            <fieldset class="legend-group">
+              <legend>Offender Address</legend>
+              <div class="form-row-left">
+                <label class="form-label-left">Postcode</label>
+                <input v-model="offSearch.postcode" type="text" placeholder="Postcode" maxlength="20" />
+                <label class="form-label-left">Address 1</label>
+                <input v-model="offSearch.address1" type="text" placeholder="Address 1" maxlength="100" />
+                <label class="form-label-left">Address 2</label>
+                <input v-model="offSearch.address2" type="text" placeholder="Address 2" maxlength="100" />
+                <label class="form-label-left">Town</label>
+                <input v-model="offSearch.town" type="text" placeholder="Town" maxlength="100" />
+              </div>
+            </fieldset>
+            <button class="btn-action-green search-btn" :disabled="offenderSearchLoading" @click="runOffenderSearch">
+              {{ offenderSearchLoading ? 'SEARCHING…' : 'SEARCH' }}
+            </button>
+          </div>
+
+          <div class="offender-search-right">
+            <div class="result-panel">
+              <div class="result-panel-title">Matching Results</div>
+              <div class="table-wrap result-table">
+                <table>
+                  <thead>
+                    <tr><th>Address</th><th>Telephone</th><th>Resident</th><th>Postcode</th></tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(m, i) in offMatchingResults" :key="'m'+i" @click="pickOffenderMatch(m)">
+                      <td>{{ m.address }}</td>
+                      <td>{{ m.telephone }}</td>
+                      <td>{{ m.resident }}</td>
+                      <td>{{ m.postcode }}</td>
+                    </tr>
+                    <tr v-if="!offMatchingResults.length">
+                      <td colspan="4" class="result-empty">
+                        {{ offenderSearchAttempted ? 'No matching customers found.' : 'Enter criteria and click SEARCH.' }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="result-panel">
+              <div class="result-panel-title">Offenders At Same Street</div>
+              <div class="table-wrap result-table">
+                <table>
+                  <thead><tr><th>Offender</th><th>Address</th></tr></thead>
+                  <tbody>
+                    <tr v-for="(s, i) in offSameStreetResults" :key="'s'+i">
+                      <td>{{ s.name }}</td>
+                      <td>{{ s.address }}</td>
+                    </tr>
+                    <tr v-if="!offSameStreetResults.length">
+                      <td colspan="2" class="result-empty">No nearby offenders.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div class="result-panel">
+              <div class="result-panel-title">Electoral Roll Residents</div>
+              <div class="table-wrap result-table">
+                <table>
+                  <thead><tr><th>Resident</th><th>Address</th></tr></thead>
+                  <tbody>
+                    <tr><td colspan="2" class="result-empty">Electoral roll data not available.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <p v-if="offenderSearchError" class="form-error" role="alert">{{ offenderSearchError }}</p>
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn-action-red" @click="closeOffenderSearchModal">CANCEL</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Address picker modal (postcodes.io / future provider with >1 result) -->
+    <div v-if="addressModalOpen" class="modal-backdrop" @click.self="closeAddressModal">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="addr-modal-title">
+        <div class="modal-head">
+          <h2 id="addr-modal-title" class="modal-title">Select an address</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="closeAddressModal">×</button>
+        </div>
+        <div class="modal-body">
+          <p class="modal-sub">Postcode <strong>{{ addressLookupPostcode }}</strong> — {{ addressResults.length }} matches</p>
+          <ul v-if="addressResults.length" class="addr-list">
+            <li v-for="(a, i) in addressResults" :key="i">
+              <button type="button" class="addr-item" @click="pickAddress(a)">
+                {{ a.label }}
+              </button>
+            </li>
+          </ul>
+          <p v-else class="empty-state-desc">No addresses found for this postcode.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Hidden file picker used by the Attachments tab ADD button. -->
+    <input
+      ref="fileInputRef"
+      type="file"
+      multiple
+      style="display:none"
+      @change="onAttachmentChosen"
+    />
+
+    <!-- Add Note modal — queues the note locally; addThisCase POSTs it to
+         /api/revp/cases/<new_case_id>/notes/ after the case row is created. -->
+    <div v-if="noteModalOpen" class="modal-backdrop" @click.self="noteModalOpen = false">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="add-note-title">
+        <div class="modal-head">
+          <h2 id="add-note-title" class="modal-title">Add Note</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="noteModalOpen = false">×</button>
+        </div>
+        <div class="modal-body" style="padding:16px 20px;">
+          <label class="form-label-left" style="display:block;margin-bottom:6px;">Note text</label>
+          <textarea
+            v-model="noteText"
+            rows="6"
+            maxlength="10000"
+            placeholder="Type the note here…"
+            style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-family:inherit;font-size:13px;"
+          ></textarea>
+          <p v-if="noteError" class="form-error" role="alert"
+             style="color:#b91c1c;font-size:12px;margin-top:6px;">
+            {{ noteError }}
+          </p>
+        </div>
+        <div class="modal-foot" style="padding:12px 20px;display:flex;justify-content:flex-end;gap:8px;">
+          <button type="button" class="btn-action-red"   @click="noteModalOpen = false">CANCEL</button>
+          <button type="button" class="btn-action-green" @click="saveQueuedNote">ADD TO LIST</button>
+        </div>
+      </div>
     </div>
   </AppLayout>
 </template>
 
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
-
-const caseTypes = ['PFN', 'UFN', 'PCN', 'MG11', 'MICS', 'FT', 'MG', 'PF']
-const titles = ['Mr', 'Mrs', 'Miss', 'Ms', 'Dr']
-const employmentStatuses = ['Employed', 'Self-employed', 'Unemployed', 'Student', 'Retired']
-const verificationTypes = ['Passport', 'Driving License', 'Bank Statement', 'Utility Bill']
-const signatureOptions = ['Signed', 'Not signed', 'Refused']
-
-const tabs = [
-  { id: 'customer',    label: 'CUSTOMER DETAILS' },
-  { id: 'journey',     label: 'JOURNEY DETAILS' },
-  { id: 'notes',       label: 'NOTES' },
-  { id: 'attachments', label: 'ATTACHMENTS' }
+import { casesService }     from '@/services/cases.service.js'
+import { customersService } from '@/services/customers.service.js'
+import { journeyService }   from '@/services/journey.service.js'
+import { vehiclesService }  from '@/services/vehicles.service.js'
+import { lookupService }    from '@/services/lookup.service.js'
+import { addressesService } from '@/services/addresses.service.js'
+import { stationsService }  from '@/services/stations.service.js'
+// Legacy parity: only two selectable states. Empty selection = customer
+// signed normally. The form value ('1' / '2') maps to two boolean columns
+// on revp_case (refuse_to_sign / unable_to_sign) when the case is saved.
+const signatureOptions = [
+  { value: '1', label: 'Refuse to sign' },
+  { value: '2', label: 'Unable to sign' },
 ]
+
+// PCN-detection: case_type.code === 'PCN' OR case_option contains 'Car Park'.
+// Mirrors legacy caseaction.cfm:608 — a PCN case creates a vehicle row
+// instead of a journey row, and the form should show the Car Park fields
+// instead of the Journey From/To inputs.
+const isPcnCase = computed(() => {
+  const t = caseTypes.value.find(c => c.case_type_id === form.caseTypeId)
+  if (!t) return false
+  const code = (t.code || '').toUpperCase()
+  const option = (t.case_option || '').toLowerCase()
+  return code === 'PCN' || option.includes('car park')
+})
+
+// Tabs swap "JOURNEY DETAILS" ↔ "CAR PARK DETAILS" based on the case type.
+const tabs = computed(() => [
+  { id: 'customer',    label: 'CUSTOMER DETAILS' },
+  { id: 'journey',     label: isPcnCase.value ? 'CAR PARK DETAILS' : 'JOURNEY DETAILS' },
+  { id: 'notes',       label: 'NOTES' },
+  { id: 'attachments', label: 'ATTACHMENTS' },
+])
 const activeTab = ref('customer')
 const basicOpen = ref(true)
 
+const caseTypes = ref([])
+const caseTypesLoading = ref(false)
+const caseTypesError = ref('')
+
+const caseIssuers = ref([])
+const caseIssuersLoading = ref(false)
+const caseIssuersError = ref('')
+
+// Autocomplete state for Case Issuer
+const caseIssuerSearch = ref('')
+const caseIssuerOpen = ref(false)
+const issuerAcRef = ref(null)
+const MAX_ISSUER_SUGGESTIONS = 50
+
+function formatIssuer(u) {
+  const name = u.full_name || u.username || ''
+  return u.username && u.full_name ? `${u.full_name} (${u.username})` : name
+}
+
+const filteredIssuers = computed(() => {
+  const q = caseIssuerSearch.value.trim().toLowerCase()
+  if (!q) return caseIssuers.value.slice(0, MAX_ISSUER_SUGGESTIONS)
+  return caseIssuers.value
+    .filter(u =>
+      (u.full_name || '').toLowerCase().includes(q)
+      || (u.username || '').toLowerCase().includes(q)
+    )
+    .slice(0, MAX_ISSUER_SUGGESTIONS)
+})
+
+function selectIssuer(u) {
+  form.caseIssuerId = u.user_id
+  caseIssuerSearch.value = formatIssuer(u)
+  caseIssuerOpen.value = false
+}
+
+function onIssuerInput() {
+  caseIssuerOpen.value = true
+  // If the user edits away from the selected display, invalidate the selection.
+  if (form.caseIssuerId) {
+    const selected = caseIssuers.value.find(u => u.user_id === form.caseIssuerId)
+    if (selected && caseIssuerSearch.value !== formatIssuer(selected)) {
+      form.caseIssuerId = ''
+    }
+  }
+}
+
+function onDocMousedown(e) {
+  if (issuerAcRef.value && !issuerAcRef.value.contains(e.target)) {
+    caseIssuerOpen.value = false
+  }
+  if (journeyFromAcRef.value && !journeyFromAcRef.value.contains(e.target)) {
+    journeyFromOpen.value = false
+  }
+  if (journeyToAcRef.value && !journeyToAcRef.value.contains(e.target)) {
+    journeyToOpen.value = false
+  }
+}
+
+// ── Journey From / To autocomplete (station search) ────────────────────────────
+// Mirrors the legacy stations.cfc?method=getStationListJson behaviour: type a
+// station name fragment or 3-letter CRS code, pick a suggestion shown as
+// "STATION NAME - CRS". The value written into the field is the same string,
+// matching the legacy data shape.
+const STATION_AC_DEBOUNCE_MS = 250
+const STATION_AC_MIN_QUERY   = 2
+const STATION_AC_LIMIT       = 15
+
+const journeyFromAcRef        = ref(null)
+const journeyFromOpen         = ref(false)
+const journeyFromSuggestions  = ref([])
+let journeyFromTimer = null
+let journeyFromSeq   = 0
+
+const journeyToAcRef          = ref(null)
+const journeyToOpen           = ref(false)
+const journeyToSuggestions    = ref([])
+let journeyToTimer = null
+let journeyToSeq   = 0
+
+function stationLabel(s) {
+  const name = (s.station_name || '').toUpperCase()
+  const crs  = (s.crs_code || '').toUpperCase()
+  return crs ? `${name} - ${crs}` : name
+}
+
+async function runStationSearch(term, seqRef, setSeq, suggestionsRef, openRef) {
+  const mySeq = setSeq()
+  try {
+    const res = await stationsService.autocomplete(term, STATION_AC_LIMIT)
+    if (mySeq !== seqRef()) return
+    suggestionsRef.value = res?.results ?? []
+    openRef.value = suggestionsRef.value.length > 0
+  } catch {
+    if (mySeq !== seqRef()) return
+    suggestionsRef.value = []
+    openRef.value = false
+  }
+}
+
+function onJourneyFromInput() {
+  const term = (form.journeyFrom || '').trim()
+  if (journeyFromTimer) clearTimeout(journeyFromTimer)
+  if (term.length < STATION_AC_MIN_QUERY) {
+    journeyFromSuggestions.value = []
+    journeyFromOpen.value = false
+    return
+  }
+  journeyFromTimer = setTimeout(() => {
+    runStationSearch(
+      term,
+      () => journeyFromSeq,
+      () => ++journeyFromSeq,
+      journeyFromSuggestions,
+      journeyFromOpen,
+    )
+  }, STATION_AC_DEBOUNCE_MS)
+}
+
+function onJourneyFromFocus() {
+  if (journeyFromSuggestions.value.length > 0) journeyFromOpen.value = true
+}
+
+function selectJourneyFrom(s) {
+  form.journeyFrom = stationLabel(s)
+  journeyFromOpen.value = false
+}
+
+function onJourneyToInput() {
+  const term = (form.journeyTo || '').trim()
+  if (journeyToTimer) clearTimeout(journeyToTimer)
+  if (term.length < STATION_AC_MIN_QUERY) {
+    journeyToSuggestions.value = []
+    journeyToOpen.value = false
+    return
+  }
+  journeyToTimer = setTimeout(() => {
+    runStationSearch(
+      term,
+      () => journeyToSeq,
+      () => ++journeyToSeq,
+      journeyToSuggestions,
+      journeyToOpen,
+    )
+  }, STATION_AC_DEBOUNCE_MS)
+}
+
+function onJourneyToFocus() {
+  if (journeyToSuggestions.value.length > 0) journeyToOpen.value = true
+}
+
+function selectJourneyTo(s) {
+  form.journeyTo = stationLabel(s)
+  journeyToOpen.value = false
+}
+
+// Lookup-data dropdowns (Title, Employment Status, …)
+const titles = ref([])
+const titlesLoading = ref(false)
+const titlesError = ref('')
+
+const employmentStatuses = ref([])
+const employmentLoading = ref(false)
+const employmentError = ref('')
+
+const verificationTypes = ref([])
+const verificationLoading = ref(false)
+const verificationError = ref('')
+
+async function loadLookup(typeName, target, loadingRef, errorRef) {
+  loadingRef.value = true
+  errorRef.value = ''
+  try {
+    target.value = await lookupService.listByType(typeName)
+  } catch (err) {
+    errorRef.value = err?.data?.detail || `Failed to load ${typeName}.`
+    target.value = []
+  } finally {
+    loadingRef.value = false
+  }
+}
+
+onMounted(() => {
+  loadCaseTypes()
+  loadCaseIssuers()
+  loadLookup('PERSON_TITLE',           titles,             titlesLoading,       titlesError)
+  loadLookup('OCCUPATION',             employmentStatuses, employmentLoading,   employmentError)
+  loadLookup('CASE_VERIFICATION_TYPE', verificationTypes,  verificationLoading, verificationError)
+  document.addEventListener('mousedown', onDocMousedown)
+})
+onUnmounted(() => document.removeEventListener('mousedown', onDocMousedown))
+
+async function loadCaseTypes() {
+  caseTypesLoading.value = true
+  caseTypesError.value = ''
+  try {
+    caseTypes.value = await casesService.listTypes()
+  } catch (err) {
+    caseTypesError.value = err?.data?.detail || 'Failed to load case types.'
+    caseTypes.value = []
+  } finally {
+    caseTypesLoading.value = false
+  }
+}
+
+async function loadCaseIssuers() {
+  caseIssuersLoading.value = true
+  caseIssuersError.value = ''
+  try {
+    caseIssuers.value = await casesService.listIssuers()
+  } catch (err) {
+    caseIssuersError.value = err?.data?.detail || 'Failed to load case issuers.'
+    caseIssuers.value = []
+  } finally {
+    caseIssuersLoading.value = false
+  }
+}
+
 const form = reactive({
   // Basic Information
-  caseType: '',
+  caseTypeId: '',
   offenceDate: '',
-  caseIssuer: '',
+  caseIssuerId: '',
   manualCaseRef: false,
 
   // Customer
-  title: '',
+  titleId: '',
   firstName: '',
   lastName: '',
   dob: '',
@@ -333,7 +1131,7 @@ const form = reactive({
   telephone: '',
   mobileTelephone: '',
   email: '',
-  employmentStatus: '',
+  employmentStatusId: '',
   parentGuardian: '',
 
   // Address
@@ -341,13 +1139,49 @@ const form = reactive({
   address1: '',
   address2: '',
   town: '',
+  addressSearchReference: '',
 
   // Manual Verification
-  verificationType: '',
+  verificationTypeId: '',
   verificationNotes: '',
 
   // Customer Signature
   customerSignature: '',
+
+  // Offender description (the ADD DESCRIPTION modal). All fields persist on
+  // form.description until the case is POSTed; they map to columns on
+  // revp_customer_desc.
+  description: {
+    bodyCamera: '0',          // '0' = No, '1' = Yes
+    build: '',                 // PERSON_BUILD            (lookup_data_id)
+    hairColor: '',             // PERSON_HAIR_COLOUR      (lookup_data_id)
+    otherHairColor: '',
+    hairType: '',              // PERSON_HAIR_TYPE        (lookup_data_id)
+    eyeColor: '',              // PERSON_EYE_COLOUR       (lookup_data_id)
+    otherEyeColor: '',
+    ethnicAppearance: '',
+    ethnicity: '',             // PERSON_ETHNICITY        (lookup_data_id)
+    facialHairType: '',        // PERSON_FACIAL_HAIR_TYPE (lookup_data_id)
+    otherFacialHairType: '',
+    height: '',
+    handed: '',                // PERSON_HANDEDNESS       (lookup_data_id)
+    glasses: '',               // PERSON_GLASSES          (lookup_data_id)
+    bracelet: false,
+    necklace: false,
+    watch: false,
+    brooch: false,
+    pin: false,
+    pendant: false,
+    earrings: false,
+    ring: false,
+    other: false,
+    jewelleryDescription: '',
+    marksAndScars: '',
+    tatoos: '',
+    complexion: '',
+    habitualDress: '',
+    additionalDescription: '',
+  },
 
   // Journey
   place: '',
@@ -357,7 +1191,19 @@ const form = reactive({
   trainServiceId: '',
   smartcardNumber: '',
   fareTravelled: 0,
-  farePaid: 0
+  farePaid: 0,
+
+  // Car Park / PCN fields → revp_vehicle_details
+  vehicleReg:        '',
+  vehicleColour:     '',
+  vehicleMake:       '',   // maps to manufacturer
+  vehicleModel:      '',
+  carparkIssueReason: '',
+  offenceFromTime:   '',
+  offenceToTime:     '',
+  payDisplayTicketNum:   '',
+  payDisplayTicketExpiry: '',
+  carparkDetails:    '',
 })
 
 const outstanding = computed(() => {
@@ -386,18 +1232,722 @@ function toggleAllAttachments() {
 }
 
 function goNext() {
-  const idx = tabs.findIndex(t => t.id === activeTab.value)
-  if (idx < tabs.length - 1) activeTab.value = tabs[idx + 1].id
+  // tabs is a computed ref (JOURNEY ↔ CAR PARK swap depends on case type),
+  // so we have to read .value before calling array methods on it.
+  const list = tabs.value
+  const idx = list.findIndex(t => t.id === activeTab.value)
+  if (idx >= 0 && idx < list.length - 1) activeTab.value = list[idx + 1].id
 }
 
-function addThisCase()              { /* TODO: POST to RevpConfig.addCaseDetails */ }
-function openAddDescription()       { /* TODO: open offender description modal */ }
-function enterAddressSearchReference() { /* TODO: open address-search-reference modal */ }
-function performAddressSearch()     { /* TODO: route to Perform Address Search */ }
-function addNote()                  { /* TODO: open add-note modal */ }
-function openAttach()               { /* TODO: open selected attachment */ }
-function addAttach()                { /* TODO: open add-attachment modal */ }
-function deleteAttach()             { /* TODO: delete selected attachments */ }
+// Address lookup state + handlers
+const addressLookupLoading = ref(false)
+const addressLookupError = ref('')
+const addressLookupInfo = ref('')
+const addressLookupPostcode = ref('')
+const addressResults = ref([])
+const addressModalOpen = ref(false)
+
+async function performAddressSearch() {
+  const pc = (form.postcode || '').trim()
+  if (!pc) {
+    addressLookupError.value = 'Enter a postcode first.'
+    return
+  }
+  addressLookupLoading.value = true
+  addressLookupError.value = ''
+  addressLookupInfo.value = ''
+  try {
+    const results = await addressesService.lookup(pc)
+    if (results.length === 0) {
+      addressLookupError.value = 'Postcode not found.'
+      return
+    }
+    // postcodes.io always returns at most one result. Auto-fill straight
+    // into the form and tell the user they still need to type the street.
+    if (results.length === 1) {
+      pickAddress(results[0])
+      const a = results[0]
+      const where = [a.town, a.county].filter(Boolean).join(', ')
+      addressLookupInfo.value = where
+        ? `Postcode matched: ${where}. Please enter Address 1 and Address 2.`
+        : 'Postcode matched. Please enter Address 1 and Address 2.'
+      return
+    }
+    // Multiple results path (kept for future providers that return real addresses)
+    addressResults.value = results
+    addressLookupPostcode.value = pc
+    addressModalOpen.value = true
+  } catch (err) {
+    addressLookupError.value = err?.data?.detail || err?.message || 'Address lookup failed.'
+  } finally {
+    addressLookupLoading.value = false
+  }
+}
+
+function pickAddress(a) {
+  // line_1 / line_2 are empty from postcodes.io; only overwrite if non-empty
+  // so we don't clear what the user has already typed.
+  if (a.line_1) form.address1 = a.line_1
+  if (a.line_2) form.address2 = a.line_2
+  if (a.town)   form.town     = a.town
+  if (a.postcode) form.postcode = a.postcode
+  closeAddressModal()
+}
+
+function closeAddressModal() {
+  addressModalOpen.value = false
+}
+
+// Auto-lookup postcode as the user types — fires 500ms after typing stops,
+// only when the value passes UK postcode format, and only once per distinct
+// postcode (so the auto-fill that follows a successful lookup doesn't
+// re-trigger an infinite loop).
+const UK_POSTCODE_RE = /^[A-Z]{1,2}[0-9][A-Z0-9]?[0-9][A-Z]{2}$/
+let postcodeLookupTimer = null
+let lastAutoLookedUp = ''
+
+watch(() => form.postcode, (newVal) => {
+  if (postcodeLookupTimer) clearTimeout(postcodeLookupTimer)
+  const normalized = (newVal || '').trim().toUpperCase().replace(/\s+/g, '')
+  if (!UK_POSTCODE_RE.test(normalized)) return
+  if (normalized === lastAutoLookedUp) return
+  postcodeLookupTimer = setTimeout(() => {
+    lastAutoLookedUp = normalized
+    performAddressSearch()
+  }, 500)
+})
+
+// Address Search Reference modal (small) — stores an external reference id on the case.
+const referenceModalOpen = ref(false)
+const referenceInput = ref('')
+
+function openAddressReferenceModal() {
+  referenceInput.value = form.addressSearchReference || ''
+  referenceModalOpen.value = true
+}
+function cancelReferenceModal() { referenceModalOpen.value = false }
+function saveReferenceModal() {
+  form.addressSearchReference = (referenceInput.value || '').trim().slice(0, 45)
+  referenceModalOpen.value = false
+}
+
+// Perform Address Search modal — offender / duplicate-customer history search.
+// UI is wired; backend endpoint (GET /api/revp/customers/search/) is not yet
+// implemented, so SEARCH currently returns empty results plus a TODO note.
+const offenderSearchOpen = ref(false)
+const offenderSearchLoading = ref(false)
+const offenderSearchError = ref('')
+const offenderSearchAttempted = ref(false)
+const offMatchingResults = ref([])
+const offSameStreetResults = ref([])
+const offSearch = reactive({
+  firstName: '',
+  middleName: '',
+  lastName: '',
+  postcode: '',
+  address1: '',
+  address2: '',
+  town: '',
+})
+
+function openOffenderSearchModal() {
+  offSearch.firstName  = form.firstName  || ''
+  offSearch.middleName = ''
+  offSearch.lastName   = form.lastName   || ''
+  offSearch.postcode   = form.postcode   || ''
+  offSearch.address1   = form.address1   || ''
+  offSearch.address2   = form.address2   || ''
+  offSearch.town       = form.town       || ''
+  offMatchingResults.value  = []
+  offSameStreetResults.value = []
+  offenderSearchError.value = ''
+  offenderSearchAttempted.value = false
+  offenderSearchOpen.value = true
+}
+function closeOffenderSearchModal() { offenderSearchOpen.value = false }
+
+async function runOffenderSearch() {
+  offenderSearchLoading.value = true
+  offenderSearchError.value = ''
+  offenderSearchAttempted.value = true
+  try {
+    const data = await customersService.search(offSearch)
+    offMatchingResults.value   = data.matching   || []
+    offSameStreetResults.value = data.same_street || []
+  } catch (err) {
+    offMatchingResults.value = []
+    offSameStreetResults.value = []
+    offenderSearchError.value = err?.data?.detail || err?.message || 'Search failed.'
+  } finally {
+    offenderSearchLoading.value = false
+  }
+}
+
+function pickOffenderMatch(m) {
+  // Prefill the main form's customer/address fields from the selected match.
+  if (m.first_name) form.firstName = m.first_name
+  if (m.last_name)  form.lastName  = m.last_name
+  if (m.address1)   form.address1  = m.address1
+  if (m.address2)   form.address2  = m.address2
+  if (m.town)       form.town      = m.town
+  if (m.postcode)   form.postcode  = m.postcode
+  if (m.telephone)  form.telephone = m.telephone
+  if (m.email)      form.email     = m.email
+  // Cache the existing customer_id so the submit chain skips step 1
+  // (no new customer row written) and the new case is linked to this
+  // existing customer. Description / verification / signature / journey
+  // are still written fresh per case.
+  if (m.customer_id) {
+    savedCustomerId.value = m.customer_id
+    linkedCustomerName.value = [m.first_name, m.last_name]
+      .filter(Boolean).join(' ').trim() || `Customer #${m.customer_id}`
+  }
+  offenderSearchOpen.value = false
+}
+
+// Visible indicator that an existing customer is attached. Empty when we're
+// going to create a fresh customer on submit. Cleared by `unlinkCustomer`.
+const linkedCustomerName = ref('')
+
+function unlinkCustomer() {
+  savedCustomerId.value    = null
+  linkedCustomerName.value = ''
+  // Don't wipe the form fields — the user might still want their values to
+  // seed a new customer record. If they want a clean form they'll clear it
+  // manually or use Reset (when that exists).
+}
+
+// Offender Description modal — opens from the ADD DESCRIPTION button.
+const descriptionModalOpen = ref(false)
+const descLookupsLoaded = ref(false)
+const descLookups = reactive({
+  build:          { items: [], loading: false, error: '' },
+  hairColor:      { items: [], loading: false, error: '' },
+  hairType:       { items: [], loading: false, error: '' },
+  eyeColor:       { items: [], loading: false, error: '' },
+  ethnicity:      { items: [], loading: false, error: '' },
+  facialHairType: { items: [], loading: false, error: '' },
+  handed:         { items: [], loading: false, error: '' },
+  glasses:        { items: [], loading: false, error: '' },
+})
+// Snapshot taken on open so CANCEL can roll back any edits.
+let descSnapshot = null
+
+async function loadDescLookup(key, typeName) {
+  descLookups[key].loading = true
+  descLookups[key].error = ''
+  try {
+    descLookups[key].items = await lookupService.listByType(typeName)
+  } catch (err) {
+    descLookups[key].error = err?.data?.detail || `Failed to load ${typeName}.`
+    descLookups[key].items = []
+  } finally {
+    descLookups[key].loading = false
+  }
+}
+
+async function ensureDescLookups() {
+  if (descLookupsLoaded.value) return
+  await Promise.all([
+    loadDescLookup('build',          'PERSON_BUILD'),
+    loadDescLookup('hairColor',      'PERSON_HAIR_COLOUR'),
+    loadDescLookup('hairType',       'PERSON_HAIR_TYPE'),
+    loadDescLookup('eyeColor',       'PERSON_EYE_COLOUR'),
+    loadDescLookup('ethnicity',      'PERSON_ETHNICITY'),
+    loadDescLookup('facialHairType', 'PERSON_FACIAL_HAIR_TYPE'),
+    loadDescLookup('handed',         'PERSON_HANDEDNESS'),
+    loadDescLookup('glasses',        'PERSON_GLASSES'),
+  ])
+  descLookupsLoaded.value = true
+}
+
+function openAddDescription() {
+  // Snapshot current state so CANCEL can revert.
+  descSnapshot = JSON.parse(JSON.stringify(form.description))
+  descriptionModalOpen.value = true
+  ensureDescLookups()
+}
+
+function saveDescription() {
+  // NEXT — values already live on form.description via v-model. Just close.
+  descriptionModalOpen.value = false
+}
+
+function cancelDescription() {
+  // Roll back to the snapshot we took on open.
+  if (descSnapshot) Object.assign(form.description, descSnapshot)
+  descriptionModalOpen.value = false
+}
+
+// ── Add-Case submit ───────────────────────────────────────────────────────────
+const router = useRouter()
+const submitting    = ref(false)
+const submitError   = ref('')
+const submitSuccess = ref('')
+
+// Cached IDs across retries — if step 1 (customer) or step 3 (journey) already
+// landed on a previous submit attempt, we skip re-creating them on retry. The
+// cache is cleared on success and on Clear Filters / reset; it persists for
+// the lifetime of the page otherwise.
+const savedCustomerId      = ref(null)
+const savedJourneyId       = ref(null)
+const savedDescriptionId   = ref(null)
+const savedVerificationId  = ref(null)
+const savedVehicleId       = ref(null)
+
+function buildCreateCasePayload() {
+  // Combine the date-only offence input with the journey time when given,
+  // otherwise default to midnight on the offence date. <input type="datetime-local">
+  // returns 'YYYY-MM-DDTHH:mm' (no seconds) — pad to 'YYYY-MM-DDTHH:mm:ss' so the
+  // backend's stricter parsers also accept it.
+  let caseDt = null
+  if (form.offenceDate) {
+    const t = (form.timeDateOfTravel || '').trim()
+    if (t) {
+      caseDt = t.length === 16 ? `${t}:00` : t
+    } else {
+      caseDt = `${form.offenceDate}T00:00:00`
+    }
+  }
+
+  // Manual Case Ref unchecked → send blank so the server generates a unique ref.
+  // Checked but no UI input today → still send blank; service still auto-gens.
+  const payload = {
+    case_type_id: form.caseTypeId || '',
+  }
+  if (caseDt) payload.case_dt = caseDt
+  if (form.caseIssuerId) payload.case_issuer = form.caseIssuerId
+  return payload
+}
+
+// Strip the trailing " - CRS" suffix the Journey From/To autocomplete adds.
+// Keeps the human-readable station name only — matches the legacy storage
+// convention seen in revp_journey_details (e.g. "Bedford", not "BEDFORD - BDM").
+function stationNameOnly(s) {
+  if (!s) return ''
+  return s.replace(/\s*-\s*[A-Z0-9]{2,4}\s*$/, '').trim()
+}
+
+function hasAnyCustomerData() {
+  return Boolean(
+    form.titleId || form.firstName || form.lastName ||
+    form.email || form.telephone || form.mobileTelephone ||
+    form.postcode || form.address1 || form.address2 || form.town,
+  )
+}
+
+function buildCustomerPayload() {
+  // titleId is a PERSON_TITLE lookup_data_id; the backend stores the title
+  // text, so we dereference here before sending.
+  const titleText = titles.value.find(t => t.lookup_data_id === form.titleId)?.value || ''
+  const payload = {}
+  if (titleText)            payload.title          = titleText
+  if (form.firstName)       payload.first_name     = form.firstName
+  if (form.lastName)        payload.surname        = form.lastName
+  if (form.email)           payload.email          = form.email
+  // Mobile takes priority over landline when both are entered — there's only
+  // one contact_number column. Document the choice in the UI later if needed.
+  const phone = form.mobileTelephone || form.telephone
+  if (phone)                payload.contact_number = phone
+  if (form.address1)        payload.address1       = form.address1
+  if (form.address2)        payload.address2       = form.address2
+  if (form.town)            payload.city_town      = form.town
+  if (form.postcode)        payload.post_code      = form.postcode
+  return payload
+}
+
+// Customer description payload — DOB, gender, occupation, parent/guardian.
+// These map to revp_customer_desc, not customer. Filled in via the same
+// Customer Details tab in the form.
+function hasAnyDescriptionData() {
+  return Boolean(
+    form.dob || form.gender || form.employmentStatusId || form.parentGuardian,
+  )
+}
+
+function buildDescriptionPayload() {
+  // employmentStatusId is an OCCUPATION lookup_data_id; the backend stores
+  // the display text, so dereference here before sending.
+  const occupationText = employmentStatuses.value
+    .find(o => o.lookup_data_id === form.employmentStatusId)?.value || ''
+  const payload = {}
+  // Only send DOB if it's a valid past date — protects the DB from
+  // today / future / malformed values slipping through.
+  const dobAge = ageFromDob(form.dob)
+  const dobIsValid = form.dob && dobAge != null && dobAge >= 0
+  if (dobIsValid) {
+    payload.date_of_birth = form.dob
+    payload.customer_age  = dobAge
+  }
+  if (form.gender)         payload.gender          = form.gender
+  if (occupationText)      payload.occupation      = occupationText
+  if (form.parentGuardian) payload.parent_guardian = form.parentGuardian
+  return payload
+}
+
+function ageFromDob(iso) {
+  if (!iso) return null
+  const dob = new Date(iso)
+  if (Number.isNaN(dob.getTime())) return null
+  const now = new Date()
+  let age = now.getFullYear() - dob.getFullYear()
+  const m = now.getMonth() - dob.getMonth()
+  if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age--
+  // A negative age (future DOB) is never meaningful; clamp to null.
+  return age >= 0 ? age : null
+}
+
+// Yesterday in YYYY-MM-DD — used as the `max` attribute on the DOB input
+// so the calendar refuses today and any future date.
+const dobMaxDate = computed(() => {
+  const d = new Date()
+  d.setDate(d.getDate() - 1)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+})
+
+// Age is derived from DOB — shown read-only on the form, sent to the
+// backend on submit. Empty string when DOB isn't a usable past date.
+const computedAge = computed(() => {
+  const a = ageFromDob(form.dob)
+  return a == null ? '' : a
+})
+
+// Verification — Type comes from a CASE_VERIFICATION_TYPE lookup, Notes is free text.
+function hasAnyVerificationData() {
+  return Boolean(form.verificationTypeId || form.verificationNotes)
+}
+
+function buildVerificationPayload() {
+  const typeText = verificationTypes.value
+    .find(v => v.lookup_data_id === form.verificationTypeId)?.value || ''
+  const payload = {}
+  if (typeText)               payload.verification_type = typeText
+  if (form.verificationNotes) payload.additional_info   = form.verificationNotes
+  return payload
+}
+
+// Customer Signature → revp_case.refuse_to_sign / unable_to_sign flags.
+// '1' = Refuse to sign, '2' = Unable to sign, '' = customer signed.
+function signatureFlags() {
+  return {
+    refuse_to_sign: form.customerSignature === '1' ? 1 : 0,
+    unable_to_sign: form.customerSignature === '2' ? 1 : 0,
+  }
+}
+
+function hasAnyVehicleData() {
+  return Boolean(
+    form.vehicleReg || form.vehicleColour || form.vehicleMake || form.vehicleModel ||
+    form.carparkIssueReason || form.carparkDetails ||
+    form.offenceFromTime || form.offenceToTime ||
+    form.payDisplayTicketNum || form.payDisplayTicketExpiry,
+  )
+}
+
+function buildVehiclePayload(caseId) {
+  // Legacy passes case_id to the bean but the table itself has no
+  // case_id column — the linkage is via revp_case.vehicle_id. Including
+  // it keeps the backend validator's `required: case_id` happy.
+  const payload = { case_id: caseId }
+  if (form.vehicleReg)          payload.reg_num         = form.vehicleReg
+  if (form.vehicleColour)       payload.colour          = form.vehicleColour
+  if (form.vehicleMake)         payload.manufacturer    = form.vehicleMake
+  if (form.vehicleModel)        payload.model           = form.vehicleModel
+  if (form.carparkIssueReason)  payload.issue_for_reason = form.carparkIssueReason
+  if (form.carparkDetails)      payload.carpark_details = form.carparkDetails
+  if (form.offenceFromTime)     payload.offence_from   = form.offenceFromTime
+  if (form.offenceToTime)       payload.offence_to     = form.offenceToTime
+  if (form.payDisplayTicketNum) payload.pay_display_ticket_num    = form.payDisplayTicketNum
+  if (form.payDisplayTicketExpiry) payload.pay_display_ticket_expiry = form.payDisplayTicketExpiry
+  return payload
+}
+
+function hasAnyJourneyData() {
+  return Boolean(
+    form.place || form.journeyFrom || form.journeyTo ||
+    form.timeDateOfTravel || form.smartcardNumber ||
+    Number(form.fareTravelled) || Number(form.farePaid),
+  )
+}
+
+function buildJourneyPayload(caseId) {
+  const payload = { case_id: caseId }
+  if (form.place)           payload.place            = form.place
+  if (form.journeyFrom)     payload.journey_from     = stationNameOnly(form.journeyFrom)
+  if (form.journeyTo)       payload.journey_to       = stationNameOnly(form.journeyTo)
+  if (form.smartcardNumber) payload.smartcard_number = form.smartcardNumber
+  if (form.timeDateOfTravel) {
+    const t = form.timeDateOfTravel.trim()
+    payload.travel_dt = t.length === 16 ? `${t}:00` : t
+  }
+  if (Number(form.fareTravelled)) payload.fare_travelled = Number(form.fareTravelled)
+  if (Number(form.farePaid))      payload.fare_paid      = Number(form.farePaid)
+  return payload
+}
+
+async function addThisCase() {
+  submitError.value = ''
+  submitSuccess.value = ''
+
+  // Client-side guard against obvious omissions — backend repeats the check.
+  if (!form.caseTypeId) {
+    submitError.value = 'Case Type is required.'
+    activeTab.value = 'customer'  // pull the user back to the field
+    return
+  }
+  if (!form.offenceDate) {
+    submitError.value = 'Offence Date is required.'
+    activeTab.value = 'customer'
+    return
+  }
+  if (!form.caseIssuerId) {
+    submitError.value = 'Case Issuer is required.'
+    activeTab.value = 'customer'
+    return
+  }
+
+  submitting.value = true
+  // Pull cached IDs forward so a retry after a partial failure doesn't
+  // create a second customer / journey / description / verification / vehicle row.
+  let customerId     = savedCustomerId.value
+  let createdCase    = null
+  let journeyId      = savedJourneyId.value
+  let descriptionId  = savedDescriptionId.value
+  let verificationId = savedVerificationId.value
+  let vehicleId      = savedVehicleId.value
+
+  // Temp diagnostic — confirms the orchestration ran and saw the form values.
+  // eslint-disable-next-line no-console
+  console.debug('[add-case] submit', {
+    has_customer_data: hasAnyCustomerData(),
+    has_journey_data:  hasAnyJourneyData(),
+    reusing_customer:  Boolean(customerId),
+    reusing_journey:   Boolean(journeyId),
+    customer_payload:  hasAnyCustomerData() ? buildCustomerPayload() : null,
+    journey_form_snapshot: {
+      place:            form.place,
+      journeyFrom:      form.journeyFrom,
+      journeyTo:        form.journeyTo,
+      timeDateOfTravel: form.timeDateOfTravel,
+      smartcardNumber:  form.smartcardNumber,
+      fareTravelled:    form.fareTravelled,
+      farePaid:         form.farePaid,
+    },
+  })
+  try {
+    // Step 1 — find-or-create customer. Backend matches the legacy
+    // CustomerService.getCustomerID() — exact 6-field match (first_name +
+    // surname + email + contact_number + post_code + toc_id) reuses the
+    // existing row instead of creating a duplicate. `was_existing=true`
+    // in the response tells us which path the backend took.
+    let customerWasExisting = false
+    if (!customerId && hasAnyCustomerData()) {
+      const customer = await customersService.create(buildCustomerPayload())
+      customerId = customer.customer_id
+      customerWasExisting = Boolean(customer.was_existing)
+      savedCustomerId.value = customerId
+    }
+
+    // Step 1b — customer description (DOB / Gender / Occupation / etc.)
+    // Only attempted when we have a customer to attach it to. Skipped if
+    // the form didn't fill any description-specific fields.
+    if (customerId && !descriptionId && hasAnyDescriptionData()) {
+      const desc = await customersService.createDescription(customerId, buildDescriptionPayload())
+      descriptionId = desc.customer_desc_id
+      savedDescriptionId.value = descriptionId
+    }
+
+    // Step 2 — create the case skeleton. Customer link + signature flags
+    // are folded into the case row itself. For PCN cases the legacy app
+    // also creates the vehicle BEFORE the case so the case row can store
+    // vehicle_id. We do the same — the vehicle endpoint takes case_id but
+    // doesn't actually store it; the linkage is one-way via revp_case.
+    if (isPcnCase.value && !vehicleId && hasAnyVehicleData()) {
+      // case_id is required by the vehicle validator; we don't have one
+      // yet at this point. Pass a placeholder UUID — the field isn't
+      // stored on the vehicle row, only used for the validator gate.
+      const v = await vehiclesService.create(buildVehiclePayload('pending'))
+      vehicleId = v.vehicle_id
+      savedVehicleId.value = vehicleId
+    }
+
+    const casePayload = buildCreateCasePayload()
+    if (customerId) casePayload.customer_id = customerId
+    if (vehicleId)  casePayload.vehicle_id  = vehicleId
+    Object.assign(casePayload, signatureFlags())
+    createdCase = await casesService.create(casePayload)
+
+    // Step 3 — create the journey, FK back to the case (non-PCN cases only).
+    if (!isPcnCase.value && !journeyId && hasAnyJourneyData()) {
+      const journey = await journeyService.create(buildJourneyPayload(createdCase.case_id))
+      journeyId = journey.journey_id
+      savedJourneyId.value = journeyId
+    }
+
+    // Step 3b — verification (revp_case_verification) hangs off the case.
+    if (!verificationId && hasAnyVerificationData()) {
+      const v = await casesService.createVerification(createdCase.case_id, buildVerificationPayload())
+      verificationId = v.verification_id
+      savedVerificationId.value = verificationId
+    }
+
+    // Step 3c — queued notes. Each entry has a `note` text field;
+    // anything with a non-local id has already been saved on a prior attempt
+    // so we skip it to keep the chain idempotent under retry.
+    for (const n of notes.value) {
+      if (typeof n.id === 'string' && n.id.startsWith('local-')) {
+        const created = await casesService.createNote(createdCase.case_id, n.note)
+        n.id = created.note_id   // mark as persisted; safe on retry
+      }
+    }
+
+    // Step 3d — queued attachments. Same idempotency trick: anything whose
+    // local id was replaced with the backend's attachment_id on a previous
+    // attempt is skipped on this one.
+    for (const a of attachments.value) {
+      if (typeof a.id === 'string' && a.id.startsWith('local-') && a.file) {
+        const created = await casesService.uploadAttachment(createdCase.case_id, a.file)
+        a.id = created.attachment_id
+        a.file = null   // free the File reference once it's persisted
+      }
+    }
+
+    // Step 4 — if a journey was created, PUT the case to back-fill journey_id
+    // so the case-detail page can find it without a reverse-FK lookup.
+    if (journeyId) {
+      await casesService.update(createdCase.case_id, { journey_id: journeyId })
+    }
+
+    // Full success — clear the cache so the next case starts fresh.
+    savedCustomerId.value     = null
+    savedJourneyId.value      = null
+    savedDescriptionId.value  = null
+    savedVerificationId.value = null
+    savedVehicleId.value      = null
+
+    // Spell out what was actually saved so a partially-populated form
+    // can't silently look like a full save. Distinguish between "customer
+    // was reused" (matched legacy by the 6-field rule, or picked from the
+    // address-search modal) and "new customer created" so the operator
+    // can see at a glance which path ran.
+    const savedBits = ['case']
+    if (customerId) {
+      savedBits.push(customerWasExisting ? 'reused existing customer' : 'new customer')
+    }
+    if (descriptionId)         savedBits.push('description')
+    if (journeyId)             savedBits.push('journey')
+    if (vehicleId)             savedBits.push('vehicle')
+    if (verificationId)        savedBits.push('verification')
+    if (notes.value.length)    savedBits.push(`${notes.value.length} note(s)`)
+    if (attachments.value.length) savedBits.push(`${attachments.value.length} attachment(s)`)
+    submitSuccess.value =
+      `Case ${createdCase.case_num} created with ${savedBits.join(' + ')}. Opening case details…`
+    setTimeout(
+      () => router.push({ name: 'case-details', params: { caseid: createdCase.case_id } }),
+      900,
+    )
+  } catch (err) {
+    // Surface the first server-side error if there is one, else a generic msg.
+    const data = err?.data
+    let detail = ''
+    if (data && typeof data === 'object') {
+      const firstKey = Object.keys(data)[0]
+      const firstVal = data[firstKey]
+      const msg = Array.isArray(firstVal) ? firstVal[0] : firstVal
+      detail = `${firstKey}: ${msg}`
+    } else {
+      detail = err?.message || 'Failed to create case.'
+    }
+    // Tell the user what *did* land so they know where the chain broke.
+    // The cached IDs let Retry pick up where the chain stopped without
+    // duplicating customer / journey rows.
+    let context = ''
+    if (createdCase) {
+      context = ` (case ${createdCase.case_num} was saved — the journey step failed; you can edit the case to add journey details)`
+    } else if (customerId) {
+      context = ` (customer was saved — Retry will reuse it, not duplicate it)`
+    }
+    submitError.value = `${detail}${context}`
+  } finally {
+    submitting.value = false
+  }
+}
+// ── Notes (queued locally until the case is created) ───────────────────────────
+// Each entry: { id, datetime, author, note }. On submit, addThisCase loops
+// through pendingNotes and POSTs each one to /api/revp/cases/<id>/notes/.
+const noteModalOpen = ref(false)
+const noteText      = ref('')
+const noteError     = ref('')
+
+function addNote() {
+  noteText.value = ''
+  noteError.value = ''
+  noteModalOpen.value = true
+}
+
+function saveQueuedNote() {
+  const text = (noteText.value || '').trim()
+  if (!text) {
+    noteError.value = 'Note text is required.'
+    return
+  }
+  notes.value.push({
+    id:       `local-${Date.now()}`,
+    datetime: new Date().toLocaleString(),
+    author:   '(you)',
+    note:     text,
+  })
+  noteModalOpen.value = false
+}
+
+function removeQueuedNote(id) {
+  const idx = notes.value.findIndex(n => n.id === id)
+  if (idx !== -1) notes.value.splice(idx, 1)
+}
+
+// ── Attachments (queued File objects until the case is created) ────────────────
+// Each entry: { id, datetime, uploader, filename, size, file }. `file` is
+// the real File reference used by addThisCase when it uploads to the new case.
+const fileInputRef = ref(null)
+
+function addAttach() {
+  // Trigger the hidden <input type="file"> click.
+  fileInputRef.value?.click()
+}
+
+function onAttachmentChosen(event) {
+  const fileList = event.target.files
+  if (!fileList || fileList.length === 0) return
+  for (const file of fileList) {
+    attachments.value.push({
+      id:       `local-${Date.now()}-${file.name}`,
+      datetime: new Date().toLocaleString(),
+      uploader: '(you)',
+      filename: file.name,
+      size:     `${Math.max(1, Math.round(file.size / 1024))} KB`,
+      file,
+    })
+  }
+  // Reset so the same file can be re-picked if the user changes their mind.
+  event.target.value = ''
+}
+
+function openAttach() {
+  // Pre-save the file isn't persisted yet — there's nothing to download.
+  // Show a brief info message via the submitError banner so the operator
+  // knows why "open" doesn't do anything until after the case is saved.
+  submitError.value = 'Attachments can be opened after the case is saved.'
+  setTimeout(() => { if (submitError.value.startsWith('Attachments can')) submitError.value = '' }, 3000)
+}
+
+function deleteAttach() {
+  // Remove every selected attachment from the local queue.
+  for (const id of selectedAttachments.value) {
+    const idx = attachments.value.findIndex(a => a.id === id)
+    if (idx !== -1) attachments.value.splice(idx, 1)
+  }
+  selectedAttachments.value = []
+}
 </script>
 
 <style scoped>
@@ -485,17 +2035,20 @@ function deleteAttach()             { /* TODO: delete selected attachments */ }
   position: absolute;
   right: 8px; top: 50%;
   transform: translateY(-50%);
-  width: 18px; height: 18px;
+  width: 22px; height: 22px;
   background: var(--primary);
   color: #fff;
+  border: none;
   border-radius: 50%;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
-  cursor: help;
+  cursor: pointer;
 }
+.help-icon:hover:not(:disabled) { background: var(--primary-hover); }
+.help-icon:disabled { opacity: 0.5; cursor: wait; }
 
 .input-currency {
   display: flex;
@@ -597,7 +2150,262 @@ function deleteAttach()             { /* TODO: delete selected attachments */ }
   letter-spacing: 0.04em;
   transition: background var(--transition);
 }
-.btn-add-case:hover { background: #128968; }
+.btn-add-case:hover:not(:disabled) { background: #128968; }
+.btn-add-case:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Submit feedback banners shown above the ADD THIS CASE button. */
+.submit-banner {
+  margin-top: 16px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  border: 1px solid transparent;
+}
+.submit-banner-error   { background: #fef2f2; border-color: #fecaca; color: #b91c1c; }
+.submit-banner-success { background: #ecfdf5; border-color: #a7f3d0; color: #047857; }
+.linked-customer-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #1d4ed8;
+}
+.link-unlink-btn {
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid #1d4ed8;
+  border-radius: 4px;
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.link-unlink-btn:hover { background: #dbeafe; }
+
+/* Wrapper for input + inline error inside the 2-col form grid.
+   Without this, the error <span> would become a third grid child and shift
+   every subsequent label/input out of alignment. */
+.field-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field-cell > select,
+.field-cell > input { width: 100%; }
+
+/* Case Issuer autocomplete */
+.autocomplete { position: relative; }
+.autocomplete-dropdown {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0; right: 0;
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 50;
+  padding: 4px;
+}
+.autocomplete-item {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 13px;
+  text-align: left;
+  color: var(--text-default);
+  border-radius: var(--radius-sm);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+.autocomplete-item:hover,
+.autocomplete-item.active {
+  background: var(--bg-hover);
+  color: var(--text-strong);
+}
+.autocomplete-empty {
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text-light);
+}
+
+.form-info {
+  font-size: 11px;
+  color: #15a982;
+  margin-top: 2px;
+}
+
+/* Address picker modal */
+.modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 2000;
+  padding: 20px;
+}
+.modal-panel {
+  background: #fff;
+  border-radius: var(--radius);
+  box-shadow: 0 12px 40px rgba(0,0,0,0.18);
+  width: 100%; max-width: 520px;
+  max-height: 80vh;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.modal-title {
+  font-size: 15px; font-weight: 600;
+  color: var(--text-strong);
+}
+.modal-close {
+  width: 28px; height: 28px;
+  border: none; background: none;
+  font-size: 22px; line-height: 1;
+  color: var(--text-light);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.modal-close:hover { background: var(--bg-hover); color: var(--text-strong); }
+.modal-body {
+  padding: 14px 18px;
+  overflow-y: auto;
+}
+.modal-sub {
+  font-size: 12px; color: var(--text-light);
+  margin-bottom: 10px;
+}
+.addr-list { list-style: none; padding: 0; margin: 0; }
+.addr-list li + li { margin-top: 4px; }
+.addr-item {
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  font-size: 13px;
+  color: var(--text-default);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.addr-item:hover {
+  background: var(--primary-light);
+  border-color: var(--primary);
+  color: var(--text-strong);
+}
+
+/* Wide modal + footer for the legacy-style search dialogs */
+.modal-panel-wide {
+  max-width: 1100px;
+}
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+  background: #fafbfc;
+}
+
+/* Offender Description modal layout */
+.desc-modal-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+}
+@media (max-width: 900px) {
+  .desc-modal-body { grid-template-columns: 1fr; }
+}
+.desc-col { display: flex; flex-direction: column; gap: 10px; }
+.desc-row {
+  display: grid;
+  grid-template-columns: 170px 1fr;
+  gap: 12px;
+  align-items: center;
+}
+.desc-row-textarea { align-items: start; }
+.desc-row-textarea .desc-label { padding-top: 8px; }
+.desc-label {
+  font-size: 13px;
+  color: var(--text-default);
+  font-weight: 500;
+}
+.desc-row select,
+.desc-row input[type="text"],
+.desc-row textarea { width: 100%; }
+.desc-row input[type="checkbox"] {
+  width: 16px; height: 16px;
+  justify-self: start;
+}
+
+/* Offender search modal layout */
+.offender-search-body {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 18px;
+}
+@media (max-width: 900px) {
+  .offender-search-body { grid-template-columns: 1fr; }
+}
+.offender-search-left { display: flex; flex-direction: column; gap: 12px; }
+.offender-search-right { display: flex; flex-direction: column; gap: 12px; }
+.search-btn { align-self: flex-start; }
+
+.result-panel {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+  overflow: hidden;
+}
+.result-panel-title {
+  padding: 8px 12px;
+  font-size: 12px; font-weight: 700;
+  color: var(--text-strong);
+  background: var(--bg-page);
+  border-bottom: 1px solid var(--border);
+}
+.result-table table { width: 100%; border-collapse: collapse; }
+.result-table th, .result-table td {
+  padding: 7px 10px;
+  font-size: 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+.result-table th { background: #f3f4f6; color: var(--text-muted); font-weight: 600; }
+.result-table tbody tr { cursor: pointer; }
+.result-table tbody tr:hover { background: var(--primary-light); }
+.result-empty { color: var(--text-light); font-style: italic; cursor: default; text-align: center; }
+.result-empty:hover { background: none; }
+
+/* Saved address reference pill */
+.ref-pill {
+  margin-top: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px 4px 10px;
+  background: var(--primary-light);
+  color: var(--primary);
+  border-radius: 999px;
+  font-size: 12px;
+}
+.ref-clear {
+  width: 18px; height: 18px;
+  border: none;
+  background: none;
+  color: var(--primary);
+  font-size: 14px; line-height: 1;
+  cursor: pointer;
+}
+.ref-clear:hover { color: var(--danger); }
 
 @media (max-width: 720px) {
   .form-row-left { grid-template-columns: 1fr; }
