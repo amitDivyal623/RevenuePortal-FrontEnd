@@ -1,5 +1,12 @@
-import { api } from '@/services/api.js'
+import { apiGet } from '@/services/api.js'
 
 export const caseTypesService = {
-  getAll: () => api.get('/revp/cases/types/'),
+  getAll: () =>
+    apiGet('/revp/cases/case-types/').then(items =>
+      (items ?? []).map(ct => ({
+        case_type_id: ct.type_id,
+        code:         ct.code,
+        case_option:  ct.description,
+      }))
+    ),
 }

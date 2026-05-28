@@ -77,7 +77,6 @@
               <th @click="sort('code')" class="sortable">Case Type {{ sortIcon('code') }}</th>
               <th @click="sort('enteredbyname')" class="sortable">Entered By {{ sortIcon('enteredbyname') }}</th>
               <th @click="sort('CreatedDT')" class="sortable">Date/Time {{ sortIcon('CreatedDT') }}</th>
-              <th>Issued By</th>
               <th>Issued To</th>
               <th @click="sort('issuedDate')" class="sortable">Issued Date {{ sortIcon('issuedDate') }}</th>
               <th style="text-align:right">Pad Start</th>
@@ -91,7 +90,7 @@
           </thead>
           <tbody>
             <tr v-if="pagedRows.length === 0">
-              <td colspan="13">
+              <td colspan="12">
                 <div class="empty-state">
                   <div class="empty-state-icon">🎫</div>
                   <p class="empty-state-title">No ticket pads found</p>
@@ -103,7 +102,6 @@
               <td><span class="badge badge-primary">{{ row.code }}</span></td>
               <td class="text-muted">{{ row.enteredbyname }}</td>
               <td class="text-muted">{{ formatDateTime(row.CreatedDT) }}</td>
-              <td>{{ row.issuedbyuser }}</td>
               <td>
                 <strong>{{ row.FirstName }} {{ row.Surname }}</strong>
                 <span class="text-light"> ({{ row.issuedtouser }})</span>
@@ -123,9 +121,7 @@
               </td>
               <td style="text-align:right">
                 <div class="flex gap-xs" style="justify-content:flex-end">
-                  <button type="button" class="btn btn-secondary btn-sm" @click="openView(row)">View</button>
                   <button type="button" class="btn btn-secondary btn-sm" @click="openEdit(row)">Edit</button>
-                  <button type="button" class="btn btn-danger btn-sm" @click="openDelete(row)">Delete</button>
                 </div>
               </td>
             </tr>
@@ -145,7 +141,7 @@
       </div>
     </div>
 
-    <!-- Add / Edit / View modal -->
+    <!-- Add / Edit modal -->
     <div v-if="modalOpen" class="modal-overlay" @click.self="closeModal" role="dialog" aria-modal="true" :aria-label="modalTitle">
       <div class="modal modal-lg">
         <div class="modal-header">
@@ -154,10 +150,10 @@
         </div>
 
         <form class="modal-body" @submit.prevent="saveTicketPad" novalidate>
-          <!-- Disabled toggle (edit + view only — matches legacy `flag EQ 'edit'` branch) -->
+          <!-- Disabled toggle (edit only — matches legacy `flag EQ 'edit'` branch) -->
           <div v-if="modalMode !== 'add'" class="toggle-row mb-md">
             <label class="toggle-cell">
-              <input type="checkbox" v-model="form.disabledFlag" :disabled="modalMode==='view'" />
+              <input type="checkbox" v-model="form.disabledFlag" />
               <span>Disabled</span>
             </label>
           </div>
@@ -233,7 +229,7 @@
                 <select id="m-issueto" v-model="form.issuedTo" :disabled="isFieldDisabled">
                   <option value="">Select Issued To</option>
                   <option v-for="u in tocUsers" :key="`it-${u.UserID}`" :value="u.UserID">
-                    {{ u.Username }} ({{ u.FirstName }} {{ u.Surname }})
+                    {{ u.Username }}
                   </option>
                 </select>
                 <span v-if="errors.issuedTo" class="form-error">{{ errors.issuedTo }}</span>
@@ -243,36 +239,13 @@
 
           <div class="modal-footer">
             <p v-if="formError" class="form-error" role="alert" style="flex:1">{{ formError }}</p>
-            <button v-if="modalMode==='view'" type="button" class="btn btn-secondary" @click="closeModal">Close</button>
-            <template v-else>
-              <button type="button" class="btn btn-secondary" @click="closeModal">Cancel</button>
-              <button type="submit" class="btn btn-primary">Save</button>
-            </template>
+            <button type="button" class="btn btn-secondary" @click="closeModal">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save</button>
           </div>
         </form>
       </div>
     </div>
 
-    <!-- Delete confirmation modal -->
-    <div v-if="deleteOpen" class="modal-overlay" @click.self="deleteOpen=false" role="dialog" aria-modal="true">
-      <div class="modal modal-sm">
-        <div class="modal-header">
-          <h2 class="modal-title">Delete Ticket Pad</h2>
-          <button type="button" class="modal-close" @click="deleteOpen=false" aria-label="Close">×</button>
-        </div>
-        <div class="modal-body">
-          <strong>Are you sure you want to delete this Ticket Pad?</strong>
-          <p class="text-muted" style="margin-top:8px;font-size:13px">
-            "{{ deleteTarget?.code }}" — {{ deleteTarget?.startNum }}–{{ deleteTarget?.endNum }} issued to
-            {{ deleteTarget?.FirstName }} {{ deleteTarget?.Surname }}. This will mark the pad inactive.
-          </p>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-success" @click="deleteOpen=false">Cancel</button>
-          <button type="button" class="btn btn-danger" @click="confirmDelete">Delete</button>
-        </div>
-      </div>
-    </div>
   </AppLayout>
 </template>
 
@@ -295,17 +268,20 @@ const filterEnteredBy = ref('')
 const filterIssuedBy  = ref('')
 const filterIssuedTo  = ref('')
 
+// Applied only on Search click — dropdowns alone do not trigger filtering
+const appliedCaseType  = ref('')
+const appliedEnteredBy = ref('')
+const appliedIssuedBy  = ref('')
+const appliedIssuedTo  = ref('')
+
 const page = ref(1)
 const perPage = ref(10)
 const sortKey = ref('CreatedDT')
 const sortDir = ref('desc')
 
 const modalOpen = ref(false)
-const modalMode = ref('add')   // 'add' | 'edit' | 'view'
+const modalMode = ref('add')   // 'add' | 'edit'
 const formError = ref('')
-
-const deleteOpen = ref(false)
-const deleteTarget = ref(null)
 
 const blankForm = () => ({
   ticket_pad_id: '',
@@ -323,25 +299,20 @@ const form = reactive(blankForm())
 const errors = reactive({})
 
 const modalTitle = computed(() =>
-  modalMode.value === 'add'  ? 'Add Ticket Pad'  :
-  modalMode.value === 'edit' ? 'Edit Ticket Pad' :
-                               'View Ticket Pad'
+  modalMode.value === 'add' ? 'Add Ticket Pad' : 'Edit Ticket Pad'
 )
 
-/* Visual-only dim when Disabled is checked in edit mode (matches legacy
-   `.disabled-fields` + disable :input behaviour). In view mode all inputs
-   are already disabled. */
 const isFieldDisabled = computed(() =>
-  modalMode.value === 'view' || (modalMode.value === 'edit' && form.disabledFlag)
+  modalMode.value === 'edit' && form.disabledFlag
 )
 
 /* ───────────── Filtering / sorting / paging ───────────── */
 const filteredPads = computed(() =>
   pads.value.filter(p =>
-    (!filterCaseType.value  || p.case_type_id === filterCaseType.value) &&
-    (!filterEnteredBy.value || p.CreatedBy    === filterEnteredBy.value) &&
-    (!filterIssuedBy.value  || p.issuedBy     === filterIssuedBy.value) &&
-    (!filterIssuedTo.value  || p.issuedTo     === filterIssuedTo.value)
+    (!appliedCaseType.value  || p.case_type_id === appliedCaseType.value) &&
+    (!appliedEnteredBy.value || p.CreatedBy    === appliedEnteredBy.value) &&
+    (!appliedIssuedBy.value  || p.issuedBy     === appliedIssuedBy.value) &&
+    (!appliedIssuedTo.value  || p.issuedTo     === appliedIssuedTo.value)
   )
 )
 
@@ -365,12 +336,23 @@ function sort(key) {
 }
 function sortIcon(k) { return sortKey.value === k ? (sortDir.value === 'asc' ? '↑' : '↓') : '' }
 
-function search() { page.value = 1 }
+function search() {
+  appliedCaseType.value  = filterCaseType.value
+  appliedEnteredBy.value = filterEnteredBy.value
+  appliedIssuedBy.value  = filterIssuedBy.value
+  appliedIssuedTo.value  = filterIssuedTo.value
+  page.value = 1
+}
+
 function clearFilters() {
   filterCaseType.value = ''
   filterEnteredBy.value = ''
   filterIssuedBy.value = ''
   filterIssuedTo.value = ''
+  appliedCaseType.value = ''
+  appliedEnteredBy.value = ''
+  appliedIssuedBy.value = ''
+  appliedIssuedTo.value = ''
   page.value = 1
 }
 
@@ -427,29 +409,9 @@ function openEdit(row) {
   modalOpen.value = true
 }
 
-function openView(row) {
-  resetForm()
-  loadIntoForm(row)
-  modalMode.value = 'view'
-  modalOpen.value = true
-}
-
 function closeModal() {
   modalOpen.value = false
   resetForm()
-}
-
-function openDelete(row) {
-  deleteTarget.value = row
-  deleteOpen.value = true
-}
-
-async function confirmDelete() {
-  const id = deleteTarget.value?.ticket_pad_id
-  if (!id) return
-  await store.removePad(id)
-  deleteOpen.value = false
-  deleteTarget.value = null
 }
 
 /* ───────────── Validation + save (mirrors legacy addTicketPadsfrm.validate rules) ───────────── */
@@ -474,9 +436,51 @@ function validate() {
   return ok
 }
 
+/* ───────────── Real-time error clearing (errors appear on submit, disappear as user fixes) ───────────── */
+function _clearBannerIfDone() {
+  if (Object.keys(errors).length === 0) formError.value = ''
+}
+
+watch(() => form.issuedDate, (v) => {
+  if (errors.issuedDate && v) { delete errors.issuedDate; _clearBannerIfDone() }
+})
+
+watch(() => form.case_type_id, (v) => {
+  if (errors.case_type_id && v) { delete errors.case_type_id; _clearBannerIfDone() }
+})
+
+watch(() => form.issuedBy, (v) => {
+  if (errors.issuedBy && v) { delete errors.issuedBy; _clearBannerIfDone() }
+})
+
+watch(() => form.issuedTo, (v) => {
+  if (errors.issuedTo && v) { delete errors.issuedTo; _clearBannerIfDone() }
+})
+
+watch(() => form.startNum, (v) => {
+  const n = Number(v)
+  if (errors.startNum && v !== null && v !== '' && !isNaN(n) && n >= 0)
+    delete errors.startNum
+  if (errors.endNum && Number.isFinite(n) && n >= 0 && Number.isFinite(Number(form.endNum)) && Number(form.endNum) > n)
+    delete errors.endNum
+  _clearBannerIfDone()
+})
+
+watch(() => form.endNum, (v) => {
+  if (errors.endNum) {
+    const end = Number(v)
+    const start = Number(form.startNum)
+    const validValue = v !== null && v !== '' && !isNaN(end) && end >= 0
+    const validRange = !Number.isFinite(start) || end > start
+    if (validValue && validRange) delete errors.endNum
+  }
+  _clearBannerIfDone()
+})
+
 function uuid() {
   return (crypto?.randomUUID?.() ?? 'id-' + Math.random().toString(16).slice(2))
 }
+
 
 function denormalise(payload) {
   const ct = findCaseType(payload.case_type_id)

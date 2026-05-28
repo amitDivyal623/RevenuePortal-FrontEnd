@@ -1,27 +1,15 @@
-import { printTemplates as seedData, caseTypes } from '@/mock/printTemplatesData.js'
-
-let _templates = [...seedData]
+import { api } from '@/services/api.js'
+import { caseTypesService } from '@/services/case-types.service.js'
 
 export const printTemplatesService = {
-  getCaseTypes: () => Promise.resolve([...caseTypes]),
-  getAll: () => Promise.resolve([..._templates]),
-  create: (payload) => {
-    const item = { print_template_id: _uuid(), active: 1, ...payload }
-    _templates.push(item)
-    return Promise.resolve(item)
-  },
-  update: (id, payload) => {
-    const item = _templates.find(t => t.print_template_id === id)
-    if (item) Object.assign(item, payload)
-    return Promise.resolve(item)
-  },
-  remove: (id) => {
-    const item = _templates.find(t => t.print_template_id === id)
-    if (item) item.active = 0
-    return Promise.resolve()
-  },
-}
+  getCaseTypes: () => caseTypesService.getAll(),
 
-function _uuid() {
-  return crypto?.randomUUID?.() ?? 'id-' + Math.random().toString(16).slice(2)
+  getAll: (page = 1, pageSize = 100) =>
+    api.get(`/revp/templates/print/?page=${page}&page_size=${pageSize}`),
+
+  getDetail: (printTemplateId) =>
+    api.get(`/revp/templates/print/detail/?print_template_id=${encodeURIComponent(printTemplateId)}`),
+
+  // payload: { print_template_id?, title, active, contents, case_type_id_data? }
+  save: (payload) => api.post('/revp/templates/print/save/', payload),
 }

@@ -23,8 +23,8 @@ export default defineConfig({
         "script-src 'self'",
         "style-src 'self' https://fonts.googleapis.com 'unsafe-inline'",
         "font-src 'self' https://fonts.gstatic.com",
-        "img-src 'self' data:",
-        "connect-src 'self'",
+        "img-src 'self' data: blob:",
+        "connect-src 'self' https://api.labelary.com",
         "frame-ancestors 'none'",
         "base-uri 'self'",
         "form-action 'self'"
