@@ -7,9 +7,11 @@ export const useEmailTemplatesStore = defineStore('emailTemplates', () => {
   const caseTypes = ref([])
   const tocUsers = ref([])
   const letterTemplates = ref([])
+  const filteredLetterTemplates = ref([])
   const tocEmailTemplates = ref([])
   const communicationAutomationEnabled = ref(false)
   const loading = ref(false)
+  const letterTemplatesLoading = ref(false)
 
   async function init() {
     loading.value = true
@@ -29,26 +31,59 @@ export const useEmailTemplatesStore = defineStore('emailTemplates', () => {
     }
   }
 
+  async function fetchTemplate(id) {
+    return emailTemplatesService.getOne(id)
+  }
+
+  function syncToEmailTemplates(item) {
+    const entry = { email_template_id: item.email_template_id, title: item.title }
+    const idx = tocEmailTemplates.value.findIndex(t => t.email_template_id === item.email_template_id)
+    if (idx !== -1) tocEmailTemplates.value[idx] = entry
+    else tocEmailTemplates.value.push(entry)
+    tocEmailTemplates.value = [...tocEmailTemplates.value].sort((a, b) => (a.title ?? '').localeCompare(b.title ?? ''))
+  }
+
   async function createTemplate(payload) {
     const item = await emailTemplatesService.create(payload)
     templates.value.push(item)
+    if (item.active === 1) syncToEmailTemplates(item)
   }
 
   async function updateTemplate(id, payload) {
-    await emailTemplatesService.update(id, payload)
-    const item = templates.value.find(t => t.email_template_id === id)
-    if (item) Object.assign(item, payload)
+    const updated = await emailTemplatesService.update(id, payload)
+    if (updated.active === 0) {
+      templates.value = templates.value.filter(t => t.email_template_id !== id)
+      tocEmailTemplates.value = tocEmailTemplates.value.filter(t => t.email_template_id !== id)
+    } else {
+      const idx = templates.value.findIndex(t => t.email_template_id === id)
+      if (idx !== -1) templates.value[idx] = updated
+      syncToEmailTemplates(updated)
+    }
   }
 
   async function removeTemplate(id) {
     await emailTemplatesService.remove(id)
-    const item = templates.value.find(t => t.email_template_id === id)
-    if (item) item.active = 0
+    templates.value = templates.value.filter(t => t.email_template_id !== id)
+    tocEmailTemplates.value = tocEmailTemplates.value.filter(t => t.email_template_id !== id)
+  }
+
+  async function fetchLetterTemplatesForCaseTypes(caseTypeIds) {
+    letterTemplatesLoading.value = true
+    try {
+      filteredLetterTemplates.value = await emailTemplatesService.getLetterTemplates(caseTypeIds)
+    } finally {
+      letterTemplatesLoading.value = false
+    }
+  }
+
+  function clearFilteredLetterTemplates() {
+    filteredLetterTemplates.value = []
   }
 
   return {
-    templates, caseTypes, tocUsers, letterTemplates, tocEmailTemplates,
-    communicationAutomationEnabled, loading,
-    init, createTemplate, updateTemplate, removeTemplate,
+    templates, caseTypes, tocUsers, letterTemplates, filteredLetterTemplates,
+    tocEmailTemplates, communicationAutomationEnabled, loading, letterTemplatesLoading,
+    init, fetchTemplate, createTemplate, updateTemplate, removeTemplate,
+    fetchLetterTemplatesForCaseTypes, clearFilteredLetterTemplates,
   }
 })

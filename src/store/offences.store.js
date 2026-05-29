@@ -4,16 +4,25 @@ import { offencesService } from '@/services/offences.service.js'
 
 export const useOffencesStore = defineStore('offences', () => {
   const offences = ref([])
-  const chargeOptions = ref([])
+  const chargeTypes = ref([])
   const loading = ref(false)
 
   async function init() {
-    const [all, charges] = await Promise.all([
-      offencesService.getAll(),
-      offencesService.getChargeOptions(),
-    ])
-    offences.value = all
-    chargeOptions.value = charges
+    loading.value = true
+    try {
+      const [all, modalData] = await Promise.all([
+        offencesService.getAll(),
+        offencesService.getModalData(),
+      ])
+      offences.value = all
+      chargeTypes.value = modalData.chargeTypes
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function fetchOffence(id) {
+    return offencesService.getOne(id)
   }
 
   async function createOffence(payload) {
@@ -22,19 +31,13 @@ export const useOffencesStore = defineStore('offences', () => {
   }
 
   async function updateOffence(id, payload) {
-    await offencesService.update(id, payload)
-    const item = offences.value.find(o => o.offence_id === id)
-    if (item) Object.assign(item, payload)
-  }
-
-  async function removeOffence(id) {
-    await offencesService.remove(id)
-    const item = offences.value.find(o => o.offence_id === id)
-    if (item) item.active = 0
+    const updated = await offencesService.update(id, payload)
+    const idx = offences.value.findIndex(o => o.offence_id === id)
+    if (idx !== -1) offences.value[idx] = updated
   }
 
   return {
-    offences, chargeOptions, loading,
-    init, createOffence, updateOffence, removeOffence,
+    offences, chargeTypes, loading,
+    init, fetchOffence, createOffence, updateOffence,
   }
 })

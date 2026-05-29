@@ -21,25 +21,23 @@ export const useManualCaseInitialsStore = defineStore('manualCaseInitials', () =
     }
   }
 
+  async function fetchInitial(id) {
+    return manualCaseInitialsService.getOne(id)
+  }
+
   async function createInitial(payload) {
     const item = await manualCaseInitialsService.create(payload)
     initials.value.push(item)
   }
 
   async function updateInitial(id, payload) {
-    await manualCaseInitialsService.update(id, payload)
-    const item = initials.value.find(i => i.case_initials_id === id)
-    if (item) Object.assign(item, payload)
-  }
-
-  async function removeInitial(id) {
-    await manualCaseInitialsService.remove(id)
-    const item = initials.value.find(i => i.case_initials_id === id)
-    if (item) item.active = 0
+    const updated = await manualCaseInitialsService.update(id, payload)
+    const idx = initials.value.findIndex(i => i.case_initials_id === id)
+    if (idx !== -1) initials.value[idx] = updated
   }
 
   return {
     initials, caseTypes, loading,
-    init, createInitial, updateInitial, removeInitial,
+    init, fetchInitial, createInitial, updateInitial,
   }
 })
