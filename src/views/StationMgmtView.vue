@@ -162,14 +162,37 @@
       <!-- Form content — hidden while detail is being fetched -->
       <div v-show="!detailLoading">
         <div class="grid-2">
-          <div class="form-group">
+          <div class="form-group station-name-group">
             <label class="form-label">Station Name <span class="req">*</span></label>
             <input
-              v-model.trim="form.station_name"
+              v-model="form.station_name"
               :disabled="modalMode === 'view'"
               maxlength="50"
-              placeholder="e.g. London King's Cross"
+              placeholder="Type station name or 3-letter CRS code, e.g. CBG"
+              autocomplete="off"
+              @input="onStationNameInput"
+              @keydown="onSuggestKey"
+              @focus="onStationNameFocus"
+              @blur="onStationNameBlur"
             />
+            <ul
+              v-if="modalMode === 'add' && suggestOpen && suggestions.length"
+              class="autocomplete-dropdown"
+            >
+              <li
+                v-for="(s, i) in suggestions"
+                :key="s.station_id"
+                :class="['autocomplete-item', { active: i === suggestActive }]"
+                @mousedown.prevent="pickSuggestion(s)"
+                @mouseenter="suggestActive = i"
+              >
+                {{ suggestLabel(s) }}
+              </li>
+            </ul>
+            <div
+              v-else-if="modalMode === 'add' && suggestLoading"
+              class="autocomplete-hint"
+            >Searching…</div>
             <span v-if="errors.station_name" class="form-error">{{ errors.station_name }}</span>
           </div>
 
@@ -296,27 +319,35 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import ConfirmDelete from '@/components/ConfirmDelete.vue'
-import { useStationsStore } from '@/store/stations.store.js'
+import { useAuthStore } from '@/store/auth.js'
+import { stationsService } from '@/services/stations.service.js'
 
-const store = useStationsStore()
+// ── Config ─────────────────────────────────────────────────────────────────────
+const STATIONS_API   = '/api/v1/revp/stations'
+const SVC_TYPES_API  = '/api/v1/revp/service-types'
+const CASE_TYPES_API = '/api/v1/revp/case-types'
+const DEFAULT_TOC_ID = '7EM3E7A8-1FC4-47F5-A6207F47F44746E7'
+
+const authStore = useAuthStore()
+function getTocId() { return authStore.user?.toc_id || DEFAULT_TOC_ID }
 
 // ── State ──────────────────────────────────────────────────────────────────────
-const rows         = computed(() => store.rows)
-const total        = computed(() => store.total)
-const serviceTypes = computed(() => store.serviceTypes)
-const caseTypes    = computed(() => store.caseTypes)
-const loading      = computed(() => store.loading)
-const apiError     = computed(() => store.error)
-
+const rows     = ref([])
+const total    = ref(0)
 const page     = ref(1)
 const pageSize = ref(25)
 
+const loading       = ref(false)
 const detailLoading = ref(false)
+const apiError   = ref('')
 const modalOpen  = ref(false)
 const modalMode  = ref('add')
 const modalError = ref('')
 const deleteOpen   = ref(false)
 const deleteTarget = ref(null)
+
+const serviceTypes = ref([])
+const caseTypes    = ref([])
 
 const filterName        = ref('')
 const filterCrs         = ref('')
@@ -341,6 +372,98 @@ const blank = () => ({
 const form   = reactive(blank())
 const errors = reactive({})
 
+// ── Add-Station auto-fill (typeahead on Station Name) ─────────────────────────
+// Queries the tenant's seeded revp_station master list and pre-fills CRS,
+// NLC, lat/long, ZAx/ZAy and order when the user picks a suggestion.
+const AUTO_FILL_DEBOUNCE_MS  = 250
+const AUTO_FILL_MIN_QUERY    = 2
+const AUTO_FILL_LIMIT        = 15
+const suggestions     = ref([])
+const suggestOpen     = ref(false)
+const suggestLoading  = ref(false)
+const suggestActive   = ref(-1)
+let suggestTimer = null
+let suggestSeq   = 0
+
+function closeSuggest() {
+  suggestOpen.value = false
+  suggestActive.value = -1
+}
+
+function onStationNameInput() {
+  if (modalMode.value !== 'add') return
+  const term = (form.station_name || '').trim()
+  if (suggestTimer) clearTimeout(suggestTimer)
+  if (term.length < AUTO_FILL_MIN_QUERY) {
+    suggestions.value = []
+    closeSuggest()
+    return
+  }
+  suggestTimer = setTimeout(async () => {
+    const mySeq = ++suggestSeq
+    suggestLoading.value = true
+    try {
+      const res = await stationsService.autocomplete(term, AUTO_FILL_LIMIT)
+      if (mySeq !== suggestSeq) return  // stale response — newer query in flight
+      suggestions.value = res?.results ?? []
+      suggestOpen.value = suggestions.value.length > 0
+      suggestActive.value = -1
+    } catch {
+      if (mySeq !== suggestSeq) return
+      suggestions.value = []
+      closeSuggest()
+    } finally {
+      if (mySeq === suggestSeq) suggestLoading.value = false
+    }
+  }, AUTO_FILL_DEBOUNCE_MS)
+}
+
+function pickSuggestion(s) {
+  form.station_name = s.station_name ?? ''
+  form.crs_code     = (s.crs_code ?? '').toUpperCase()
+  form.nlc_code     = s.nlc_code  ?? ''
+  form.latitude     = s.latitude  ?? ''
+  form.longitude    = s.longitude ?? ''
+  form.z_ax_cord    = s.z_ax_cord ?? ''
+  form.z_ay_cord    = s.z_ay_cord ?? ''
+  if (s.order != null) form.order = s.order
+  closeSuggest()
+}
+
+function onSuggestKey(e) {
+  if (!suggestOpen.value || suggestions.value.length === 0) return
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    suggestActive.value = (suggestActive.value + 1) % suggestions.value.length
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    suggestActive.value =
+      (suggestActive.value - 1 + suggestions.value.length) % suggestions.value.length
+  } else if (e.key === 'Enter' && suggestActive.value >= 0) {
+    e.preventDefault()
+    pickSuggestion(suggestions.value[suggestActive.value])
+  } else if (e.key === 'Escape') {
+    closeSuggest()
+  }
+}
+
+function onStationNameFocus() {
+  if (modalMode.value === 'add' && suggestions.value.length > 0) {
+    suggestOpen.value = true
+  }
+}
+
+function onStationNameBlur() {
+  // Delay so a mousedown on a suggestion can fire before the dropdown closes.
+  setTimeout(closeSuggest, 150)
+}
+
+function suggestLabel(s) {
+  const name = (s.station_name || '').toUpperCase()
+  const crs  = (s.crs_code || '').toUpperCase()
+  return crs ? `${name} - ${crs}` : name
+}
+
 // ── Computed ───────────────────────────────────────────────────────────────────
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 const pageStart  = computed(() => (page.value - 1) * pageSize.value + 1)
@@ -363,24 +486,63 @@ function caseTypeCode(id) {
 }
 
 // ── Fetch ──────────────────────────────────────────────────────────────────────
-function buildParams() {
-  const params = { page: page.value, page_size: pageSize.value }
-  if (filterName.value)        params.station_name    = filterName.value
-  if (filterCrs.value)         params.crs_code        = filterCrs.value
-  if (filterNlc.value)         params.nlc_code        = filterNlc.value
-  if (filterServiceType.value) params.service_type_id = filterServiceType.value
-  if (filterCaseType.value)    params.case_type_id    = filterCaseType.value
-  return params
+async function fetchAll() {
+  loading.value = true
+  apiError.value = ''
+  try {
+    const params = new URLSearchParams({
+      toc_id:    getTocId(),
+      page:      page.value,
+      page_size: pageSize.value,
+    })
+    if (filterName.value)        params.set('station_name',   filterName.value)
+    if (filterCrs.value)         params.set('crs_code',       filterCrs.value)
+    if (filterNlc.value)         params.set('nlc_code',       filterNlc.value)
+    if (filterServiceType.value) params.set('service_type_id', filterServiceType.value)
+    if (filterCaseType.value)    params.set('case_type_id',   filterCaseType.value)
+
+    const res = await fetch(`${STATIONS_API}/?${params}`)
+    if (!res.ok) throw new Error(`Server returned ${res.status}`)
+    const json = await res.json()
+    rows.value  = json.results ?? []
+    total.value = json.total   ?? 0
+  } catch {
+    apiError.value = 'Failed to load stations. Please try again.'
+    rows.value  = []
+    total.value = 0
+  } finally {
+    loading.value = false
+  }
 }
 
-function fetchAll() {
-  store.fetchAll(buildParams())
+async function fetchServiceTypes() {
+  try {
+    const res = await fetch(`${SVC_TYPES_API}/enabled/?toc_id=${getTocId()}`)
+    if (!res.ok) return
+    const json = await res.json()
+    serviceTypes.value = json.results ?? []
+  } catch {
+    console.error('Failed to load service types.')
+  }
+}
+
+async function fetchCaseTypes() {
+  try {
+    const res = await fetch(`${CASE_TYPES_API}/?toc_id=${getTocId()}`)
+    if (!res.ok) return
+    const json = await res.json()
+    caseTypes.value = json.results ?? []
+  } catch {
+    console.error('Failed to load case types.')
+  }
 }
 
 async function fetchStationDetail(stationId) {
   detailLoading.value = true
   try {
-    return await store.fetchById(stationId)
+    const res = await fetch(`${STATIONS_API}/${stationId}/?toc_id=${getTocId()}`)
+    if (!res.ok) throw new Error(`Server returned ${res.status}`)
+    return await res.json()
   } catch {
     modalError.value = 'Failed to load station details. Please try again.'
     return null
@@ -408,6 +570,12 @@ function reset() {
   Object.keys(errors).forEach(k => delete errors[k])
   modalError.value = ''
   detailLoading.value = false
+  suggestions.value = []
+  suggestOpen.value = false
+  suggestActive.value = -1
+  suggestLoading.value = false
+  if (suggestTimer) { clearTimeout(suggestTimer); suggestTimer = null }
+  suggestSeq++
 }
 
 function openAdd() {
@@ -496,40 +664,64 @@ async function saveStation() {
     longitude:       form.longitude || null,
     z_ax_cord:       form.z_ax_cord || null,
     z_ay_cord:       form.z_ay_cord || null,
+    toc_id:          getTocId(),
   }
 
   try {
-    if (modalMode.value === 'add') {
-      await store.createStation(payload)
-    } else {
-      await store.updateStation(form.id, payload)
+    const isAdd = modalMode.value === 'add'
+    const url   = isAdd ? `${STATIONS_API}/` : `${STATIONS_API}/${form.id}/`
+    const res   = await fetch(url, {
+      method:  isAdd ? 'POST' : 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload),
+    })
+
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}))
+      const firstError = json.detail || Object.values(json).flat()[0] || 'Save failed.'
+      modalError.value = firstError
+      return
     }
-    fetchAll()
+
+    await fetchAll()
     closeModal()
-  } catch (err) {
-    const data = err?.data
-    modalError.value = data?.detail || (data && Object.values(data).flat()[0]) || err?.message || 'Save failed.'
+  } catch {
+    modalError.value = 'Network error. Please try again.'
   }
 }
 
 // ── Delete ─────────────────────────────────────────────────────────────────────
 async function confirmDelete() {
+  apiError.value = ''
   try {
-    await store.removeStation(deleteTarget.value.id)
-    if (rows.value.length === 1 && page.value > 1) {
-      page.value--
+    const res = await fetch(`${STATIONS_API}/${deleteTarget.value.id}/`, { method: 'DELETE' })
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}))
+      apiError.value = json.detail || 'Delete failed.'
+      deleteOpen.value = false
+      return
     }
-    fetchAll()
-  } catch (err) {
-    store.error = err?.data?.detail || 'Delete failed. Please try again.'
+    // Remove instantly from local list — no round-trip needed
+    const idx = rows.value.findIndex(r => r.id === deleteTarget.value.id)
+    if (idx !== -1) {
+      rows.value.splice(idx, 1)
+      total.value = Math.max(0, total.value - 1)
+    }
+    if (rows.value.length === 0 && page.value > 1) {
+      page.value--
+      await fetchAll()
+    }
+  } catch {
+    apiError.value = 'Delete failed. Please try again.'
   } finally {
     deleteOpen.value = false
   }
 }
 
 onMounted(() => {
-  store.fetchReferenceData()
   fetchAll()
+  fetchServiceTypes()
+  fetchCaseTypes()
 })
 </script>
 
@@ -556,6 +748,43 @@ onMounted(() => {
   cursor: pointer;
 }
 .flex-wrap { flex-wrap: wrap; }
+.station-name-group { position: relative; }
+.autocomplete-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin: 2px 0 0;
+  padding: 4px 0;
+  list-style: none;
+  background: #fff;
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: 6px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+  max-height: 260px;
+  overflow-y: auto;
+  z-index: 30;
+}
+.autocomplete-item {
+  padding: 6px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #111827;
+  cursor: pointer;
+  text-transform: uppercase;
+  letter-spacing: 0.01em;
+}
+.autocomplete-item.active,
+.autocomplete-item:hover { background: #f3f4f6; }
+.autocomplete-hint {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 2px;
+  font-size: 12px;
+  color: #6b7280;
+  padding: 4px 8px;
+}
 @media (max-width: 720px) {
   .grid-2 { grid-template-columns: 1fr; }
   .checkbox-list { grid-template-columns: 1fr; }

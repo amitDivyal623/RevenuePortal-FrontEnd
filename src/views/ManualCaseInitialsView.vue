@@ -77,6 +77,7 @@ import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import { useManualCaseInitialsStore } from '@/store/manual-case-initials.store.js'
+import { swal } from '@/utils/swal.js'
 
 const store = useManualCaseInitialsStore()
 onMounted(() => store.init())
@@ -147,6 +148,7 @@ async function saveInitial() {
   if (modalMode.value === 'add') await store.createInitial(payload)
   else await store.updateInitial(form.case_initials_id, payload)
   closeModal()
+  await swal.success(modalMode.value === 'add' ? 'Case initial created successfully' : 'Case initial updated successfully')
 }
 </script>
 

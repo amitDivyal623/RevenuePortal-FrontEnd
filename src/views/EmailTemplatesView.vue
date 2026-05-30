@@ -157,6 +157,7 @@ import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import ConfirmDelete from '@/components/ConfirmDelete.vue'
+import { swal } from '@/utils/swal.js'
 import { useEmailTemplatesStore } from '@/store/email-templates.store.js'
 
 const store = useEmailTemplatesStore()
@@ -341,7 +342,8 @@ async function saveTpl() {
     letter_template_id: form.letter_template_id || null,
     case_type_ids: [...form.case_type_ids],
   }
-  if (modalMode.value === 'add') {
+  const isAdd = modalMode.value === 'add'
+  if (isAdd) {
     await store.createTemplate({ ...payload, active: 1 })
   } else {
     await store.updateTemplate(form.email_template_id, {
@@ -350,6 +352,7 @@ async function saveTpl() {
     })
   }
   closeModal()
+  await swal.success(isAdd ? 'Email template created successfully' : 'Email template updated successfully')
 }
 </script>
 

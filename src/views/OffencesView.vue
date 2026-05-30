@@ -108,6 +108,7 @@ import { ref, reactive, computed, onMounted, watchEffect } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import { useOffencesStore } from '@/store/offences.store.js'
+import { swal } from '@/utils/swal.js'
 
 const store = useOffencesStore()
 onMounted(() => store.init())
@@ -225,12 +226,14 @@ async function saveOffence() {
     charge: form.charge,
     offence_statement: form.offence_statement,
   }
-  if (modalMode.value === 'add') {
+  const isAdd = modalMode.value === 'add'
+  if (isAdd) {
     await store.createOffence({ ...payload, active: true })
   } else {
     await store.updateOffence(form.offence_id, { ...payload, active: !form.disabledFlag })
   }
   closeModal()
+  await swal.success(isAdd ? 'Offence created successfully' : 'Offence updated successfully')
 }
 </script>
 

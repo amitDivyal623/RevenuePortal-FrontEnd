@@ -74,8 +74,10 @@
 
           <div class="config-row">
             <label class="config-label" for="newAppealEmail">New Appeal Notifications</label>
-            <input id="newAppealEmail" type="email" v-model.trim="form.newAppealNotificationEmail" />
-            <span v-if="errors.newAppealNotificationEmail" class="form-error">{{ errors.newAppealNotificationEmail }}</span>
+            <div>
+              <input id="newAppealEmail" type="email" v-model.trim="form.newAppealNotificationEmail" @input="touched.email = true" />
+              <span v-if="errors.email" class="form-error">{{ errors.email }}</span>
+            </div>
           </div>
         </fieldset>
       </div>
@@ -120,64 +122,111 @@
       </fieldset>
 
       <div class="config-footer">
-        <p v-if="savedMessage" class="saved-message">{{ savedMessage }}</p>
-        <button type="submit" class="btn btn-success">SAVE</button>
+        <button type="submit" class="btn btn-success" :disabled="saving">{{ saving ? 'Saving…' : 'SAVE' }}</button>
       </div>
     </form>
   </AppLayout>
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
+import { reactive, ref, onMounted, watchEffect } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import { apiGet, apiPut } from '@/services/api.js'
+import { swal } from '@/utils/swal.js'
 
 const form = reactive({
-  parkingChargeNoticeDiscounted: '35.00',
-  parkingChargeNotice: '70.00',
+  parkingChargeNoticeDiscounted: '',
+  parkingChargeNotice: '',
   noteToOwner: '',
-  chargeCertificate: '25.00',
-  discountedPeriodDays: 14,
-
-  pcnAppealDeadlineDays: 14,
-  pfAppealDeadlineDays: 4,
-  ufnAppealDeadlineDays: 25,
-  newAppealNotificationEmail: 'shashank@divyaltech.com',
-
-  pfnTotalPenalty: '100.00',
-  discountPercent: '50.00',
-  pfnDiscountedDays: 4,
-  pfNewCalculationStartDate: '2022-11-29',
-  additionalDiscountAndLetterDaysOnAppeal: 2
+  chargeCertificate: '',
+  discountedPeriodDays: '',
+  pcnAppealDeadlineDays: '',
+  pfAppealDeadlineDays: '',
+  ufnAppealDeadlineDays: '',
+  newAppealNotificationEmail: '',
+  pfnTotalPenalty: '',
+  discountPercent: '',
+  pfnDiscountedDays: '',
+  pfNewCalculationStartDate: '',
+  additionalDiscountAndLetterDaysOnAppeal: '',
 })
 
 const errors = reactive({})
-const savedMessage = ref('')
+const touched = reactive({})
+const saving = ref(false)
 
-function norm(v){
+onMounted(async () => {
+  const data = await apiGet('/revp/misc/charges-appeals/')
+  form.parkingChargeNoticeDiscounted = norm(data.parkingcharge_discount ?? '')
+  form.parkingChargeNotice           = norm(data.parkingcharge ?? '')
+  form.noteToOwner                   = norm(data.noteto_owner ?? '')
+  form.chargeCertificate             = norm(data.charge_certificate ?? '')
+  form.discountedPeriodDays          = data.discount_period ?? ''
+  form.pcnAppealDeadlineDays         = data.pcn_deadline ?? ''
+  form.pfAppealDeadlineDays          = data.pf_deadline ?? ''
+  form.ufnAppealDeadlineDays         = data.ufn_deadline ?? ''
+  form.newAppealNotificationEmail    = data.newAppealNotifications ?? ''
+  form.pfnTotalPenalty               = norm(data.pfn_total_penalty ?? '')
+  form.discountPercent               = norm(data.pfn_discount_percentage ?? '')
+  form.pfnDiscountedDays             = data.pfn_discounted_days ?? ''
+  form.pfNewCalculationStartDate     = data.PFNewCalculationStartDate ?? ''
+  form.additionalDiscountAndLetterDaysOnAppeal = data.additionalDiscountAndLetterDaysonAppeal ?? ''
+})
+
+// Real-time email validation
+watchEffect(() => {
+  if (touched.email) {
+    if (form.newAppealNotificationEmail && !/^.+@.+\..+$/.test(form.newAppealNotificationEmail))
+      errors.email = 'Please enter a valid email'
+    else delete errors.email
+  } else delete errors.email
+}, { flush: 'sync' })
+
+function norm(v) {
   v = String(v ?? '').trim()
-  if(!v) return ''
-  if(v.indexOf('.') === -1) return v + '.00'
-  const [w,f] = v.split('.')
-  if(f.length === 1) return `${w}.${f}0`
-  if(f.length > 2) return parseFloat(v).toFixed(2)
+  if (!v) return ''
+  if (v.indexOf('.') === -1) return v + '.00'
+  const [w, f] = v.split('.')
+  if (f.length === 1) return `${w}.${f}0`
+  if (f.length > 2) return parseFloat(v).toFixed(2)
   return v
 }
 
-function validate(){
-  Object.keys(errors).forEach(k => delete errors[k])
-  let ok = true
-  if(form.newAppealNotificationEmail && !/^.+@.+\..+$/.test(form.newAppealNotificationEmail)){
-    errors.newAppealNotificationEmail = 'Please enter a valid email'
-    ok = false
-  }
-  return ok
-}
+async function save() {
+  touched.email = true
+  if (errors.email) return
 
-function save(){
-  savedMessage.value = ''
-  if(!validate()) return
-  savedMessage.value = 'Saved'
-  setTimeout(() => { savedMessage.value = '' }, 2500)
+  const payload = Object.fromEntries(
+    Object.entries({
+      parkingcharge_discount:                  form.parkingChargeNoticeDiscounted,
+      parkingcharge:                           form.parkingChargeNotice,
+      noteto_owner:                            form.noteToOwner,
+      charge_certificate:                      form.chargeCertificate,
+      discount_period:                         String(form.discountedPeriodDays ?? ''),
+      pcn_deadline:                            String(form.pcnAppealDeadlineDays ?? ''),
+      pf_deadline:                             String(form.pfAppealDeadlineDays ?? ''),
+      ufn_deadline:                            String(form.ufnAppealDeadlineDays ?? ''),
+      newAppealNotifications:                  form.newAppealNotificationEmail,
+      pfn_total_penalty:                       form.pfnTotalPenalty,
+      pfn_discount_percentage:                 form.discountPercent,
+      pfn_discounted_days:                     String(form.pfnDiscountedDays ?? ''),
+      PFNewCalculationStartDate:               form.pfNewCalculationStartDate,
+      additionalDiscountAndLetterDaysonAppeal: String(form.additionalDiscountAndLetterDaysOnAppeal ?? ''),
+    }).filter(([, v]) => v !== '' && v !== 'undefined' && v !== 'null')
+  )
+
+  if (Object.keys(payload).length === 0) {
+    await swal.success('Charges & Appeals saved successfully')
+    return
+  }
+
+  saving.value = true
+  try {
+    await apiPut('/revp/misc/charges-appeals/', payload)
+    await swal.success('Charges & Appeals saved successfully')
+  } finally {
+    saving.value = false
+  }
 }
 </script>
 
@@ -229,5 +278,4 @@ function save(){
   display: flex; justify-content: flex-end; align-items: center; gap: 12px;
   padding-top: 4px;
 }
-.saved-message { color: var(--success, #2e7d32); font-size: 13px; }
 </style>
