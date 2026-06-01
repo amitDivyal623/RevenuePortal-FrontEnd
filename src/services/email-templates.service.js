@@ -1,35 +1,54 @@
-import {
-  emailTemplates as seedData,
-  caseTypes,
-  tocUsers,
-  letterTemplates,
-  tocEmailTemplates,
-  communicationAutomationEnabled,
-} from '@/mock/emailTemplatesData.js'
-
-let _templates = [...seedData]
+import { apiDel, apiGet, apiPost, apiPut } from '@/services/api.js'
 
 export const emailTemplatesService = {
-  getReferenceData: () =>
-    Promise.resolve({ caseTypes, tocUsers, letterTemplates, tocEmailTemplates, communicationAutomationEnabled }),
-  getAll: () => Promise.resolve([..._templates]),
-  create: (payload) => {
-    const item = { email_template_id: _uuid(), active: 1, ...payload }
-    _templates.push(item)
-    return Promise.resolve(item)
-  },
-  update: (id, payload) => {
-    const item = _templates.find(t => t.email_template_id === id)
-    if (item) Object.assign(item, payload)
-    return Promise.resolve(item)
-  },
-  remove: (id) => {
-    const item = _templates.find(t => t.email_template_id === id)
-    if (item) item.active = 0
-    return Promise.resolve()
-  },
-}
+  getAll: () =>
+    apiGet('/revp/templates/emails/?page_size=100&active=true').then(r => r.results ?? []),
 
-function _uuid() {
-  return crypto?.randomUUID?.() ?? 'id-' + Math.random().toString(16).slice(2)
+  getReferenceData: () =>
+    apiGet('/revp/templates/emails/modal-data/').then(data => ({
+      // list_case_types returns {type_id, code, description} — normalize to {case_type_id, case_option}
+      caseTypes: (data.case_types ?? []).map(ct => ({
+        case_type_id: ct.type_id ?? ct.case_type_id,
+        case_option: ct.code ?? ct.case_option,
+      })),
+      tocUsers: data.users ?? [],
+      letterTemplates: data.letter_templates ?? [],
+      tocEmailTemplates: data.template_names ?? [],
+      communicationAutomationEnabled: data.revp_communication_automation === 'Enable',
+    })),
+
+  getOne: (id) =>
+    apiGet(`/revp/templates/emails/${id}/`),
+
+  create: (payload) =>
+    apiPost('/revp/templates/emails/create/', payload),
+
+  update: (id, payload) =>
+    apiPut(`/revp/templates/emails/${id}/`, payload),
+
+  remove: (id) =>
+    apiDel(`/revp/templates/emails/${id}/`),
+
+  getLetterTemplates: (caseTypeIds = []) => {
+    if (caseTypeIds.length === 0) {
+      return apiGet('/revp/templates/letters/?page_size=100').then(r => r.results ?? [])
+    }
+    return Promise.all(
+      caseTypeIds.map(id =>
+        apiGet(`/revp/templates/letters/?page_size=100&case_type_id=${encodeURIComponent(id)}`).then(r => r.results ?? [])
+      )
+    ).then(results => {
+      const seen = new Set()
+      const merged = []
+      for (const arr of results) {
+        for (const item of arr) {
+          if (!seen.has(item.letter_template_id)) {
+            seen.add(item.letter_template_id)
+            merged.push(item)
+          }
+        }
+      }
+      return merged.sort((a, b) => (a.title ?? '').localeCompare(b.title ?? ''))
+    })
+  },
 }

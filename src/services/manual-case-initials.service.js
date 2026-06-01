@@ -1,27 +1,25 @@
-import { initials as seedData, caseTypes } from '@/mock/manualCaseInitialsData.js'
-
-let _initials = [...seedData]
+import { apiGet, apiPost, apiPut } from '@/services/api.js'
 
 export const manualCaseInitialsService = {
-  getCaseTypes: () => Promise.resolve([...caseTypes]),
-  getAll: () => Promise.resolve([..._initials]),
-  create: (payload) => {
-    const item = { case_initials_id: _uuid(), active: 1, ...payload }
-    _initials.push(item)
-    return Promise.resolve(item)
-  },
-  update: (id, payload) => {
-    const item = _initials.find(i => i.case_initials_id === id)
-    if (item) Object.assign(item, payload)
-    return Promise.resolve(item)
-  },
-  remove: (id) => {
-    const item = _initials.find(i => i.case_initials_id === id)
-    if (item) item.active = 0
-    return Promise.resolve()
-  },
-}
+  getCaseTypes: () =>
+    apiGet('/revp/cases/case-types/?active=true').then(data => {
+      const arr = Array.isArray(data) ? data : (data.results ?? data.data ?? [])
+      return arr.map(ct => ({
+        case_type_id: ct.type_id ?? ct.case_type_id,
+        case_option: ct.code ?? ct.case_option,
+      }))
+    }),
 
-function _uuid() {
-  return crypto?.randomUUID?.() ?? 'id-' + Math.random().toString(16).slice(2)
+  getAll: () =>
+    apiGet('/revp/cases/manual-initials/?page_size=100').then(r => r.data ?? []),
+
+  getOne: (id) =>
+    apiGet(`/revp/cases/manual-initials/${id}/`),
+
+  create: (payload) =>
+    apiPost('/revp/cases/manual-initials/create/', payload),
+
+  update: (id, payload) =>
+    apiPut(`/revp/cases/manual-initials/${id}/`, payload),
+
 }
