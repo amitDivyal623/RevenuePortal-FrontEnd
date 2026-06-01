@@ -42,7 +42,9 @@
           <label class="form-label">Case Type</label>
           <select v-model="filterCaseType">
             <option value="">All</option>
-            <option v-for="ct in caseTypes" :key="ct.case_type_id" :value="ct.case_type_id">{{ ct.code }} — {{ ct.case_option }}</option>
+            <option v-for="ct in caseTypes" :key="ct.case_type_id" :value="ct.case_type_id">
+              {{ ct.case_type_code }} — {{ ct.case_type_description }}
+            </option>
           </select>
         </div>
       </div>
@@ -76,7 +78,7 @@
               <th>Station Name</th>
               <th>CRS</th>
               <th>NLC</th>
-              <th>Service Type</th>
+              <th>Service</th>
               <th>Case Types</th>
               <th>Status</th>
               <th style="text-align:right">Actions</th>
@@ -94,23 +96,23 @@
                 </div>
               </td>
             </tr>
-            <tr v-for="row in rows" :key="row.id">
+            <tr v-for="row in rows" :key="row.station_id">
               <td>{{ row.order }}</td>
               <td><strong>{{ row.station_name }}</strong></td>
               <td><span class="badge badge-primary">{{ row.crs_code }}</span></td>
               <td>{{ row.nlc_code }}</td>
-              <td class="text-muted">{{ serviceTypeName(row.service_type_id) }}</td>
+              <td class="text-muted">{{ row.short_code || '—' }}</td>
               <td>
                 <div class="flex gap-xs flex-wrap">
                   <span
-                    v-for="ct in row.case_types"
-                    :key="ct.id"
+                    v-for="ctId in (row.case_types_assigned || [])"
+                    :key="ctId"
                     class="badge badge-neutral"
                     style="font-size:0.7rem;padding:2px 6px;"
                   >
-                    {{ ct.name || caseTypeCode(ct.id) }}
+                    {{ caseTypeLabel(ctId) }}
                   </span>
-                  <span v-if="!row.case_types || row.case_types.length === 0" class="text-muted">—</span>
+                  <span v-if="!row.case_types_assigned || row.case_types_assigned.length === 0" class="text-muted">—</span>
                 </div>
               </td>
               <td>
@@ -232,14 +234,6 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label">Service Type</label>
-            <select v-model="form.service_type_id" :disabled="modalMode === 'view'">
-              <option value="">— None —</option>
-              <option v-for="s in serviceTypes" :key="s.service_id" :value="s.service_id">{{ s.name }}</option>
-            </select>
-          </div>
-
-          <div class="form-group">
             <label class="form-label">Latitude</label>
             <input v-model.trim="form.latitude" :disabled="modalMode === 'view'" placeholder="e.g. 51.5074" />
           </div>
@@ -288,7 +282,7 @@
                 v-model="form.case_type_ids"
                 :disabled="modalMode === 'view'"
               />
-              <span>{{ ct.code }} — {{ ct.case_option }}</span>
+              <span>{{ ct.case_type_code }} — {{ ct.case_type_description }}</span>
             </label>
           </div>
           <p v-else style="color:#6b7280;font-size:0.875rem;margin:4px 0 0;">
@@ -319,19 +313,13 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import ConfirmDelete from '@/components/ConfirmDelete.vue'
-import { useAuthStore } from '@/store/auth.js'
+import { api } from '@/services/api.js'
 import { stationsService } from '@/services/stations.service.js'
 
-// ── Config ─────────────────────────────────────────────────────────────────────
-const STATIONS_API   = '/api/v1/revp/stations'
-const SVC_TYPES_API  = '/api/v1/revp/service-types'
-const CASE_TYPES_API = '/api/v1/revp/case-types'
-const DEFAULT_TOC_ID = '7EM3E7A8-1FC4-47F5-A6207F47F44746E7'
+// ── Config ──────────────────────────────────────────────────────────────────
+const STATIONS_API = '/api/revp/stations'
 
-const authStore = useAuthStore()
-function getTocId() { return authStore.user?.toc_id || DEFAULT_TOC_ID }
-
-// ── State ──────────────────────────────────────────────────────────────────────
+// ── State ──────────────────────────────────────────────────────────────────
 const rows     = ref([])
 const total    = ref(0)
 const page     = ref(1)
@@ -356,37 +344,34 @@ const filterServiceType = ref('')
 const filterCaseType    = ref('')
 
 const blank = () => ({
-  id: '',
+  station_id:   '',
   station_name: '',
-  crs_code: '',
-  nlc_code: '',
-  is_active: true,
-  order: null,
-  service_type_id: '',
+  crs_code:     '',
+  nlc_code:     '',
+  is_active:    true,
+  order:        null,
   case_type_ids: [],
-  latitude: '',
-  longitude: '',
-  z_ax_cord: '',
-  z_ay_cord: '',
+  latitude:     '',
+  longitude:    '',
+  z_ax_cord:    '',
+  z_ay_cord:    '',
 })
 const form   = reactive(blank())
 const errors = reactive({})
 
-// ── Add-Station auto-fill (typeahead on Station Name) ─────────────────────────
-// Queries the tenant's seeded revp_station master list and pre-fills CRS,
-// NLC, lat/long, ZAx/ZAy and order when the user picks a suggestion.
-const AUTO_FILL_DEBOUNCE_MS  = 250
-const AUTO_FILL_MIN_QUERY    = 2
-const AUTO_FILL_LIMIT        = 15
-const suggestions     = ref([])
-const suggestOpen     = ref(false)
-const suggestLoading  = ref(false)
-const suggestActive   = ref(-1)
+// ── Add-Station auto-fill (typeahead on Station Name) ──────────────────────
+const AUTO_FILL_DEBOUNCE_MS = 250
+const AUTO_FILL_MIN_QUERY   = 2
+const AUTO_FILL_LIMIT       = 15
+const suggestions    = ref([])
+const suggestOpen    = ref(false)
+const suggestLoading = ref(false)
+const suggestActive  = ref(-1)
 let suggestTimer = null
 let suggestSeq   = 0
 
 function closeSuggest() {
-  suggestOpen.value = false
+  suggestOpen.value  = false
   suggestActive.value = -1
 }
 
@@ -404,9 +389,9 @@ function onStationNameInput() {
     suggestLoading.value = true
     try {
       const res = await stationsService.autocomplete(term, AUTO_FILL_LIMIT)
-      if (mySeq !== suggestSeq) return  // stale response — newer query in flight
-      suggestions.value = res?.results ?? []
-      suggestOpen.value = suggestions.value.length > 0
+      if (mySeq !== suggestSeq) return
+      suggestions.value  = res?.results ?? []
+      suggestOpen.value  = suggestions.value.length > 0
       suggestActive.value = -1
     } catch {
       if (mySeq !== suggestSeq) return
@@ -454,7 +439,6 @@ function onStationNameFocus() {
 }
 
 function onStationNameBlur() {
-  // Delay so a mousedown on a suggestion can fire before the dropdown closes.
   setTimeout(closeSuggest, 150)
 }
 
@@ -464,7 +448,7 @@ function suggestLabel(s) {
   return crs ? `${name} - ${crs}` : name
 }
 
-// ── Computed ───────────────────────────────────────────────────────────────────
+// ── Computed ─────────────────────────────────────────────────────────────────
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize.value)))
 const pageStart  = computed(() => (page.value - 1) * pageSize.value + 1)
 const pageEnd    = computed(() => Math.min(page.value * pageSize.value, total.value))
@@ -477,37 +461,32 @@ const modalTitle = computed(() => ({
   view: 'View Station',
 })[modalMode.value] ?? 'Station')
 
-function serviceTypeName(id) {
-  if (!id) return '—'
-  return serviceTypes.value.find(s => s.service_id === id)?.name ?? '—'
-}
-function caseTypeCode(id) {
-  return caseTypes.value.find(ct => ct.case_type_id === id)?.code ?? id
+// Look up a case type's display label by its ID
+function caseTypeLabel(id) {
+  const ct = caseTypes.value.find(c => c.case_type_id === id)
+  return ct ? ct.case_type_code : id
 }
 
-// ── Fetch ──────────────────────────────────────────────────────────────────────
+// ── Fetch ─────────────────────────────────────────────────────────────────────
 async function fetchAll() {
-  loading.value = true
+  loading.value  = true
   apiError.value = ''
   try {
     const params = new URLSearchParams({
-      toc_id:    getTocId(),
       page:      page.value,
       page_size: pageSize.value,
     })
-    if (filterName.value)        params.set('station_name',   filterName.value)
-    if (filterCrs.value)         params.set('crs_code',       filterCrs.value)
-    if (filterNlc.value)         params.set('nlc_code',       filterNlc.value)
-    if (filterServiceType.value) params.set('service_type_id', filterServiceType.value)
-    if (filterCaseType.value)    params.set('case_type_id',   filterCaseType.value)
+    if (filterName.value)        params.set('station_name', filterName.value)
+    if (filterCrs.value)         params.set('crs_code',     filterCrs.value)
+    if (filterNlc.value)         params.set('nlc_code',     filterNlc.value)
+    if (filterServiceType.value) params.set('service_id',   filterServiceType.value)
+    if (filterCaseType.value)    params.set('casetype_yes', filterCaseType.value)
 
-    const res = await fetch(`${STATIONS_API}/?${params}`)
-    if (!res.ok) throw new Error(`Server returned ${res.status}`)
-    const json = await res.json()
-    rows.value  = json.results ?? []
-    total.value = json.total   ?? 0
-  } catch {
-    apiError.value = 'Failed to load stations. Please try again.'
+    const json  = await api.get(`${STATIONS_API}/datatable/?${params}`)
+    rows.value  = json.data          ?? []
+    total.value = json.recordsTotal  ?? 0
+  } catch (err) {
+    apiError.value = err?.message || 'Failed to load stations. Please try again.'
     rows.value  = []
     total.value = 0
   } finally {
@@ -517,10 +496,8 @@ async function fetchAll() {
 
 async function fetchServiceTypes() {
   try {
-    const res = await fetch(`${SVC_TYPES_API}/enabled/?toc_id=${getTocId()}`)
-    if (!res.ok) return
-    const json = await res.json()
-    serviceTypes.value = json.results ?? []
+    const json = await api.get(`${STATIONS_API}/service-types/`)
+    serviceTypes.value = Array.isArray(json) ? json : (json.results ?? [])
   } catch {
     console.error('Failed to load service types.')
   }
@@ -528,10 +505,8 @@ async function fetchServiceTypes() {
 
 async function fetchCaseTypes() {
   try {
-    const res = await fetch(`${CASE_TYPES_API}/?toc_id=${getTocId()}`)
-    if (!res.ok) return
-    const json = await res.json()
-    caseTypes.value = json.results ?? []
+    const json = await api.get(`${STATIONS_API}/case-types/`)
+    caseTypes.value = Array.isArray(json) ? json : (json.results ?? [])
   } catch {
     console.error('Failed to load case types.')
   }
@@ -540,11 +515,9 @@ async function fetchCaseTypes() {
 async function fetchStationDetail(stationId) {
   detailLoading.value = true
   try {
-    const res = await fetch(`${STATIONS_API}/${stationId}/?toc_id=${getTocId()}`)
-    if (!res.ok) throw new Error(`Server returned ${res.status}`)
-    return await res.json()
-  } catch {
-    modalError.value = 'Failed to load station details. Please try again.'
+    return await api.get(`${STATIONS_API}/${stationId}/`)
+  } catch (err) {
+    modalError.value = err?.message || 'Failed to load station details. Please try again.'
     return null
   } finally {
     detailLoading.value = false
@@ -555,27 +528,33 @@ function doSearch()    { page.value = 1; fetchAll() }
 function changePage(n) { page.value = n; fetchAll() }
 
 function clearFilters() {
-  filterName.value = ''
-  filterCrs.value = ''
-  filterNlc.value = ''
+  filterName.value        = ''
+  filterCrs.value         = ''
+  filterNlc.value         = ''
   filterServiceType.value = ''
-  filterCaseType.value = ''
+  filterCaseType.value    = ''
   page.value = 1
   fetchAll()
 }
 
-// ── Modal helpers ──────────────────────────────────────────────────────────────
+// ── Modal helpers ─────────────────────────────────────────────────────────────
 function reset() {
   Object.assign(form, blank())
   Object.keys(errors).forEach(k => delete errors[k])
-  modalError.value = ''
+  modalError.value    = ''
   detailLoading.value = false
-  suggestions.value = []
-  suggestOpen.value = false
+  suggestions.value   = []
+  suggestOpen.value   = false
   suggestActive.value = -1
   suggestLoading.value = false
   if (suggestTimer) { clearTimeout(suggestTimer); suggestTimer = null }
   suggestSeq++
+}
+
+// Parse the backend's comma-separated case_type string into an array of IDs
+function parseCaseTypeIds(caseTypeStr) {
+  if (!caseTypeStr) return []
+  return caseTypeStr.split(',').map(s => s.trim()).filter(Boolean)
 }
 
 function openAdd() {
@@ -588,21 +567,20 @@ async function openEdit(row) {
   reset()
   modalMode.value = 'edit'
   modalOpen.value = true
-  const detail = await fetchStationDetail(row.id)
+  const detail = await fetchStationDetail(row.station_id)
   if (detail) {
     Object.assign(form, {
-      id:              detail.id,
-      station_name:    detail.station_name,
-      crs_code:        detail.crs_code,
-      nlc_code:        detail.nlc_code,
-      is_active:       detail.is_active,
-      order:           detail.order,
-      service_type_id: detail.service_type_id ?? '',
-      case_type_ids:   (detail.case_types ?? []).map(ct => ct.id),
-      latitude:        detail.latitude  ?? '',
-      longitude:       detail.longitude ?? '',
-      z_ax_cord:       detail.z_ax_cord ?? '',
-      z_ay_cord:       detail.z_ay_cord ?? '',
+      station_id:    detail.station_id,
+      station_name:  detail.station_name,
+      crs_code:      detail.crs_code      ?? '',
+      nlc_code:      detail.nlc_code      ?? '',
+      is_active:     detail.is_active,
+      order:         detail.order,
+      case_type_ids: parseCaseTypeIds(detail.case_type),
+      latitude:      detail.latitude      ?? '',
+      longitude:     detail.longitude     ?? '',
+      z_ax_cord:     detail.z_ax_cord     ?? '',
+      z_ay_cord:     detail.z_ay_cord     ?? '',
     })
   }
 }
@@ -611,33 +589,28 @@ async function openView(row) {
   reset()
   modalMode.value = 'view'
   modalOpen.value = true
-  const detail = await fetchStationDetail(row.id)
+  const detail = await fetchStationDetail(row.station_id)
   if (detail) {
     Object.assign(form, {
-      id:              detail.id,
-      station_name:    detail.station_name,
-      crs_code:        detail.crs_code,
-      nlc_code:        detail.nlc_code,
-      is_active:       detail.is_active,
-      order:           detail.order,
-      service_type_id: detail.service_type_id ?? '',
-      case_type_ids:   (detail.case_types ?? []).map(ct => ct.id),
-      latitude:        detail.latitude  ?? '',
-      longitude:       detail.longitude ?? '',
-      z_ax_cord:       detail.z_ax_cord ?? '',
-      z_ay_cord:       detail.z_ay_cord ?? '',
+      station_id:    detail.station_id,
+      station_name:  detail.station_name,
+      crs_code:      detail.crs_code      ?? '',
+      nlc_code:      detail.nlc_code      ?? '',
+      is_active:     detail.is_active,
+      order:         detail.order,
+      case_type_ids: parseCaseTypeIds(detail.case_type),
+      latitude:      detail.latitude      ?? '',
+      longitude:     detail.longitude     ?? '',
+      z_ax_cord:     detail.z_ax_cord     ?? '',
+      z_ay_cord:     detail.z_ay_cord     ?? '',
     })
   }
 }
 
 function closeModal()    { modalOpen.value = false; reset() }
-function openDelete(row) { 
-  deleteTarget.value = row; 
-  deleteOpen.value = true // open the confirmation modal
+function openDelete(row) { deleteTarget.value = row; deleteOpen.value = true }
 
-}
-
-// ── Validation ─────────────────────────────────────────────────────────────────
+// ── Validation ────────────────────────────────────────────────────────────────
 function validate() {
   Object.keys(errors).forEach(k => delete errors[k])
   let ok = true
@@ -647,62 +620,51 @@ function validate() {
   return ok
 }
 
-// ── Save (create / update) ─────────────────────────────────────────────────────
+// ── Save (create / update) ────────────────────────────────────────────────────
 async function saveStation() {
   if (!validate()) return
   modalError.value = ''
 
+  // The backend stores case types as a comma-separated string on the station row
+  // and syncs the RevpStationCasetypeMapping table in the service layer.
   const payload = {
-    station_name:    form.station_name,
-    crs_code:        form.crs_code.toUpperCase(),
-    nlc_code:        form.nlc_code,
-    is_active:       form.is_active,
-    order:           form.order || null,
-    service_type_id: form.service_type_id || null,
-    case_type_ids:   form.case_type_ids,
-    latitude:        form.latitude || null,
-    longitude:       form.longitude || null,
-    z_ax_cord:       form.z_ax_cord || null,
-    z_ay_cord:       form.z_ay_cord || null,
-    toc_id:          getTocId(),
+    station_name: form.station_name,
+    crs_code:     form.crs_code.toUpperCase(),
+    nlc_code:     form.nlc_code,
+    is_active:    form.is_active,
+    order:        form.order   || null,
+    case_type:    form.case_type_ids.join(','),
+    latitude:     form.latitude  || null,
+    longitude:    form.longitude || null,
+    z_ax_cord:    form.z_ax_cord || null,
+    z_ay_cord:    form.z_ay_cord || null,
   }
 
   try {
-    const isAdd = modalMode.value === 'add'
-    const url   = isAdd ? `${STATIONS_API}/` : `${STATIONS_API}/${form.id}/`
-    const res   = await fetch(url, {
-      method:  isAdd ? 'POST' : 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(payload),
-    })
-
-    if (!res.ok) {
-      const json = await res.json().catch(() => ({}))
-      const firstError = json.detail || Object.values(json).flat()[0] || 'Save failed.'
-      modalError.value = firstError
-      return
+    if (modalMode.value === 'add') {
+      await api.post(`${STATIONS_API}/create/`, payload)
+    } else {
+      await api.put(`${STATIONS_API}/${form.station_id}/`, payload)
     }
-
     await fetchAll()
     closeModal()
-  } catch {
-    modalError.value = 'Network error. Please try again.'
+  } catch (err) {
+    const data = err?.data
+    const firstError =
+      (data && typeof data === 'object' && data.detail) ||
+      (data && typeof data === 'object' && Object.values(data).flat()[0]) ||
+      err?.message ||
+      'Save failed.'
+    modalError.value = String(firstError)
   }
 }
 
-// ── Delete ─────────────────────────────────────────────────────────────────────
+// ── Delete ────────────────────────────────────────────────────────────────────
 async function confirmDelete() {
   apiError.value = ''
   try {
-    const res = await fetch(`${STATIONS_API}/${deleteTarget.value.id}/`, { method: 'DELETE' })
-    if (!res.ok) {
-      const json = await res.json().catch(() => ({}))
-      apiError.value = json.detail || 'Delete failed.'
-      deleteOpen.value = false
-      return
-    }
-    // Remove instantly from local list — no round-trip needed
-    const idx = rows.value.findIndex(r => r.id === deleteTarget.value.id)
+    await api.delete(`${STATIONS_API}/${deleteTarget.value.station_id}/`)
+    const idx = rows.value.findIndex(r => r.station_id === deleteTarget.value.station_id)
     if (idx !== -1) {
       rows.value.splice(idx, 1)
       total.value = Math.max(0, total.value - 1)
@@ -711,8 +673,8 @@ async function confirmDelete() {
       page.value--
       await fetchAll()
     }
-  } catch {
-    apiError.value = 'Delete failed. Please try again.'
+  } catch (err) {
+    apiError.value = err?.message || 'Delete failed. Please try again.'
   } finally {
     deleteOpen.value = false
   }

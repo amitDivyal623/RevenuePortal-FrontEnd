@@ -7,7 +7,7 @@ import { api } from '@/services/api.js'
 export const casesService = {
   // ── Reference data ────────────────────────────────────────────────────────
   listTypes:    ({ activeOnly = true } = {}) =>
-    api.get(`/revp/cases/types/${activeOnly ? '' : '?active=false'}`),
+    api.get(`/revp/cases/case-types/${activeOnly ? '' : '?active=false'}`),
   listStatuses: () => api.get('/revp/cases/statuses/'),
   listIssuers:  ({ search } = {}) =>
     api.get(`/revp/cases/issuers/${search ? `?search=${encodeURIComponent(search)}` : ''}`),

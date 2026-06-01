@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { decodeJwt } from '@/utils/jwt.js'
-import { apiGet, apiPost, apiPostPublic, ApiError } from '@/services/api.js'
+import { api, ApiError } from '@/services/api.js'
 
 const REFRESH_KEY = 'revp.refresh'
 const DEFAULT_TOC_ID = import.meta.env.VITE_DEFAULT_TOC_ID || ''
@@ -42,7 +42,7 @@ export const useAuthStore = defineStore('auth', () => {
     if (!tocToSend) {
       throw new ApiError({ status: 400, data: { toc_id: 'missing — set VITE_DEFAULT_TOC_ID in .env' } })
     }
-    const tokens = await apiPostPublic('/auth/login/', {
+    const tokens = await api.postPublic('/auth/login/', {
       username,
       password,
       toc_id: tocToSend,
@@ -56,14 +56,14 @@ export const useAuthStore = defineStore('auth', () => {
     if (!refreshToken.value) {
       throw new ApiError({ status: 401, data: { detail: 'No refresh token.' } })
     }
-    const tokens = await apiPostPublic('/auth/refresh/', { refresh: refreshToken.value })
+    const tokens = await api.postPublic('/auth/refresh/', { refresh: refreshToken.value })
     applyTokens(tokens)
   }
 
   async function logout({ skipServer = false } = {}) {
     const rt = refreshToken.value
     if (!skipServer && rt && accessToken.value) {
-      try { await apiPost('/auth/logout/', { refresh: rt }) } catch { /* clear locally regardless */ }
+      try { await api.post('/auth/logout/', { refresh: rt }) } catch { /* clear locally regardless */ }
     }
     accessToken.value = null
     user.value = null
@@ -76,7 +76,7 @@ export const useAuthStore = defineStore('auth', () => {
     const claims = decodeJwt(accessToken.value)
     if (!claims?.user_id) return
     try {
-      const data = await apiGet(`/auth/users/${claims.user_id}/`)
+      const data = await api.get(`/auth/users/${claims.user_id}/`)
       user.value = {
         user_id: data.user_id,
         username: data.username,
