@@ -1,6 +1,9 @@
 import { api } from '@/services/api.js'
 
-const BASE = '/api/revp/stations'
+// api.get() / api.post() already prepend the global '/api' from api.js,
+// so this BASE must NOT include '/api' — otherwise every call hits
+// /api/api/revp/stations/... and 404s.
+const BASE = '/revp/stations'
 
 export const stationsService = {
   // ── List (DataTables endpoint — supports all filters) ──────────────────────

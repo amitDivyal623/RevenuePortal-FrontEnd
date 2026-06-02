@@ -1,25 +1,22 @@
-import { apiGet, apiPost, apiPut } from '@/services/api.js'
+import { api } from '@/services/api.js'
+import { caseTypesService } from '@/services/case-types.service.js'
 
 export const manualCaseInitialsService = {
-  getCaseTypes: () =>
-    apiGet('/revp/cases/case-types/?active=true').then(data => {
-      const arr = Array.isArray(data) ? data : (data.results ?? data.data ?? [])
-      return arr.map(ct => ({
-        case_type_id: ct.type_id ?? ct.case_type_id,
-        case_option: ct.code ?? ct.case_option,
-      }))
-    }),
+  // Single source of truth for the case-type dropdown across the app. The
+  // previous inline fetch mapped `ct.type_id` (a field that doesn't exist on
+  // the response) into `case_type_id`, producing undefined ids and breaking
+  // every "select Case Type" validation in this module.
+  getCaseTypes: () => caseTypesService.getAll(),
 
   getAll: () =>
-    apiGet('/revp/cases/manual-initials/?page_size=100').then(r => r.data ?? []),
+    api.get('/revp/cases/manual-initials/?page_size=100').then(r => r.data ?? []),
 
   getOne: (id) =>
-    apiGet(`/revp/cases/manual-initials/${id}/`),
+    api.get(`/revp/cases/manual-initials/${id}/`),
 
   create: (payload) =>
-    apiPost('/revp/cases/manual-initials/create/', payload),
+    api.post('/revp/cases/manual-initials/create/', payload),
 
   update: (id, payload) =>
-    apiPut(`/revp/cases/manual-initials/${id}/`, payload),
-
+    api.put(`/revp/cases/manual-initials/${id}/`, payload),
 }

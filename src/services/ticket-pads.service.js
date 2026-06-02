@@ -1,14 +1,20 @@
-import { apiGet, apiPost, apiPut } from '@/services/api.js'
+import { api } from '@/services/api.js'
+import { caseTypesService } from '@/services/case-types.service.js'
 
 export const ticketPadsService = {
   getReferenceData: async () => {
     const { useAuthStore } = await import('@/store/auth.js')
     const authStore = useAuthStore()
 
+    // Case types come from caseTypesService — single source of truth across
+    // the whole app. The inline `/revp/cases/case-types/` fetch + broken
+    // {case_type_id: ct.type_id} mapper that used to live here produced
+    // undefined ids and caused the "Please select Case Type" error in the
+    // Add Ticket Pad modal even when a value looked picked.
     const [caseTypesRes, tocUsersRes, padIssuersRes] = await Promise.allSettled([
-      apiGet('/revp/cases/case-types/'),
-      apiGet('/auth/user-list/'),
-      apiGet('/revp/lookup/charges/?lookup_type_name=PAD_ISSUER&active=1'),
+      caseTypesService.getAll(),
+      api.get('/auth/user-list/'),
+      api.get('/revp/lookup/charges/?lookup_type_name=PAD_ISSUER&active=1'),
     ])
 
     if (caseTypesRes.status === 'rejected')
@@ -18,13 +24,7 @@ export const ticketPadsService = {
     if (padIssuersRes.status === 'rejected')
       console.warn('[ticket-pads] pad-issuers API failed:', padIssuersRes.reason)
 
-    const caseTypes = caseTypesRes.status === 'fulfilled'
-      ? (caseTypesRes.value ?? []).map(ct => ({
-          case_type_id: ct.type_id,
-          code: ct.code,
-          case_option: ct.description,
-        }))
-      : []
+    const caseTypes = caseTypesRes.status === 'fulfilled' ? (caseTypesRes.value ?? []) : []
 
     const tocUsers = tocUsersRes.status === 'fulfilled'
       ? (tocUsersRes.value ?? []).map(u => ({
@@ -50,7 +50,7 @@ export const ticketPadsService = {
     const allItems = []
     let page = 1
     while (true) {
-      const data = await apiGet(`/revp/ticketpads/?page=${page}&page_size=100`)
+      const data = await api.get(`/revp/ticketpads/?page=${page}&page_size=100`)
       const results = data?.results ?? []
       allItems.push(...results.map(_fromApi))
       if (allItems.length >= (data?.total ?? 0) || results.length === 0) break
@@ -60,19 +60,19 @@ export const ticketPadsService = {
   },
 
   create: async (payload) => {
-    const created = await apiPost('/revp/ticketpads/create/', _toApiCreate(payload))
-    const detail = await apiGet(`/revp/ticketpads/${created.ticket_pad_id}/`)
+    const created = await api.post('/revp/ticketpads/create/', _toApiCreate(payload))
+    const detail = await api.get(`/revp/ticketpads/${created.ticket_pad_id}/`)
     return _fromApi(detail)
   },
 
   update: async (id, payload) => {
-    await apiPut(`/revp/ticketpads/${id}/update/`, _toApiUpdate(payload))
-    const detail = await apiGet(`/revp/ticketpads/${id}/`)
+    await api.put(`/revp/ticketpads/${id}/update/`, _toApiUpdate(payload))
+    const detail = await api.get(`/revp/ticketpads/${id}/`)
     return _fromApi(detail)
   },
 
   remove: async (id) => {
-    await apiPut(`/revp/ticketpads/${id}/update/`, { active: 0 })
+    await api.put(`/revp/ticketpads/${id}/update/`, { active: 0 })
   },
 }
 

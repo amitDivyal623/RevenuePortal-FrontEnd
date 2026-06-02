@@ -317,7 +317,10 @@ import { api } from '@/services/api.js'
 import { stationsService } from '@/services/stations.service.js'
 
 // ── Config ──────────────────────────────────────────────────────────────────
-const STATIONS_API = '/api/revp/stations'
+// api.get/post/put/delete already prepend the global '/api' from api.js,
+// so this prefix must NOT include '/api' — otherwise every call goes to
+// /api/api/revp/stations/... and 404s.
+const STATIONS_API = '/revp/stations'
 
 // ── State ──────────────────────────────────────────────────────────────────
 const rows     = ref([])
