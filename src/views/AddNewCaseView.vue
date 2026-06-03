@@ -182,7 +182,7 @@
               <legend>Address</legend>
               <div class="form-row-left">
                 <label class="form-label-left">Postcode</label>
-                <div class="field-cell">
+                <div class="field-cell" style="position:relative">
                   <div class="input-with-icon">
                     <input
                       v-model="form.postcode"
@@ -199,6 +199,30 @@
                       @click="performAddressSearch"
                     >?</button>
                   </div>
+
+                  <!-- Legacy-style suggestion dropdown — appears below the postcode
+                       field after a successful lookup. Each row is a click target;
+                       picking one fills Address 1 / Town / Postcode on the form.
+                       Clicking outside or pressing Escape dismisses it. -->
+                  <ul
+                    v-if="addressSuggestions.length"
+                    class="address-suggest-popover"
+                    role="listbox"
+                  >
+                    <li
+                      v-for="(a, i) in addressSuggestions"
+                      :key="i"
+                      class="address-suggest-row"
+                      role="option"
+                      tabindex="0"
+                      @click="applySuggestion(a)"
+                      @keyup.enter="applySuggestion(a)"
+                      @keyup.space.prevent="applySuggestion(a)"
+                    >
+                      {{ a.label || [a.line_1, a.town, a.county, a.postcode].filter(Boolean).join(', ') }}
+                    </li>
+                  </ul>
+
                   <span v-if="addressLookupError" class="form-error" role="alert">{{ addressLookupError }}</span>
                   <span v-else-if="addressLookupInfo" class="form-info" role="status">{{ addressLookupInfo }}</span>
                 </div>
@@ -1244,6 +1268,10 @@ const addressLookupLoading = ref(false)
 const addressLookupError = ref('')
 const addressLookupInfo = ref('')
 const addressLookupPostcode = ref('')
+// Legacy-style suggestion dropdown — populated by performAddressSearch
+// when results come back, cleared by applySuggestion / outside-click /
+// Escape. Empty array = dropdown hidden.
+const addressSuggestions = ref([])
 const addressResults = ref([])
 const addressModalOpen = ref(false)
 
@@ -1256,27 +1284,19 @@ async function performAddressSearch() {
   addressLookupLoading.value = true
   addressLookupError.value = ''
   addressLookupInfo.value = ''
+  addressSuggestions.value = []
   try {
     const results = await addressesService.lookup(pc)
     if (results.length === 0) {
       addressLookupError.value = 'Postcode not found.'
       return
     }
-    // postcodes.io always returns at most one result. Auto-fill straight
-    // into the form and tell the user they still need to type the street.
-    if (results.length === 1) {
-      pickAddress(results[0])
-      const a = results[0]
-      const where = [a.town, a.county].filter(Boolean).join(', ')
-      addressLookupInfo.value = where
-        ? `Postcode matched: ${where}. Please enter Address 1 and Address 2.`
-        : 'Postcode matched. Please enter Address 1 and Address 2.'
-      return
-    }
-    // Multiple results path (kept for future providers that return real addresses)
-    addressResults.value = results
+    // Legacy parity: show a click-to-apply dropdown — even when there's
+    // only one match (TomTom free tier usually returns 1). The user picks
+    // the suggestion to confirm; nothing on the form changes until they
+    // click. This stops a postcode typo from silently mangling Address 1.
+    addressSuggestions.value = results
     addressLookupPostcode.value = pc
-    addressModalOpen.value = true
   } catch (err) {
     addressLookupError.value = err?.data?.detail || err?.message || 'Address lookup failed.'
   } finally {
@@ -1284,14 +1304,52 @@ async function performAddressSearch() {
   }
 }
 
-function pickAddress(a) {
-  // line_1 / line_2 are empty from postcodes.io; only overwrite if non-empty
-  // so we don't clear what the user has already typed.
-  if (a.line_1) form.address1 = a.line_1
-  if (a.line_2) form.address2 = a.line_2
-  if (a.town)   form.town     = a.town
+function applySuggestion(a) {
+  // Only overwrite form fields that the lookup actually returned —
+  // preserves anything the operator already typed manually.
+  if (a.line_1)   form.address1 = a.line_1
+  if (a.line_2)   form.address2 = a.line_2
+  if (a.town)     form.town     = a.town
   if (a.postcode) form.postcode = a.postcode
-  closeAddressModal()
+  // Confirmation banner so the operator knows what was applied.
+  const where = [a.town, a.county].filter(Boolean).join(', ')
+  addressLookupInfo.value = a.line_1
+    ? `Filled from ${where || a.postcode}. Adjust house number if needed.`
+    : `Postcode matched: ${where || a.postcode}. Please enter Address 1 and Address 2.`
+  addressSuggestions.value = []
+}
+
+// Outside-click / Escape dismissal — keeps the dropdown out of the way
+// when the operator decides not to use it. Listens only while the
+// dropdown is visible so we don't pay the cost on every page.
+function _dismissSuggestionsOnEscape(e) {
+  if (e.key === 'Escape') addressSuggestions.value = []
+}
+function _dismissSuggestionsOnClickOutside(e) {
+  // Any click that isn't inside the popover or on the postcode field
+  // (or its lookup button) closes the dropdown.
+  const popover = document.querySelector('.address-suggest-popover')
+  const target  = e.target
+  if (popover && !popover.contains(target) && !target.closest('.input-with-icon')) {
+    addressSuggestions.value = []
+  }
+}
+watch(addressSuggestions, (rows) => {
+  if (rows.length) {
+    document.addEventListener('keydown', _dismissSuggestionsOnEscape)
+    document.addEventListener('mousedown', _dismissSuggestionsOnClickOutside)
+  } else {
+    document.removeEventListener('keydown', _dismissSuggestionsOnEscape)
+    document.removeEventListener('mousedown', _dismissSuggestionsOnClickOutside)
+  }
+})
+
+// Alias kept so the (now-unused) multi-result modal's click handler
+// keeps working if it's ever surfaced again. New code should call
+// applySuggestion directly.
+function pickAddress(a) {
+  applySuggestion(a)
+  addressModalOpen.value = false
 }
 
 function closeAddressModal() {
@@ -2410,5 +2468,40 @@ function deleteAttach() {
 @media (max-width: 720px) {
   .form-row-left { grid-template-columns: 1fr; }
   .form-label-left { margin-bottom: -6px; }
+}
+
+/* Click-to-apply postcode suggestion dropdown.
+   Anchored to the relative-positioned .field-cell wrapper around the
+   postcode input — sits flush under the input with a border and shadow
+   so it reads as a popover, not part of the form layout. */
+.address-suggest-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: var(--radius-sm, 6px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+  list-style: none;
+  padding: 4px 0;
+  margin-block-start: 4px;
+  z-index: 30;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.address-suggest-row {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-strong, #1f2937);
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-row, #f3f4f6);
+}
+.address-suggest-row:last-child { border-bottom: none; }
+.address-suggest-row:hover,
+.address-suggest-row:focus {
+  background: var(--primary-tint, #eef2ff);
+  outline: none;
 }
 </style>

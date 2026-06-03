@@ -26,6 +26,11 @@ export const customersService = {
 
   create: (payload) => api.post('/customers/create/', payload),
   get:    (id)      => api.get(`/customers/${encodeURIComponent(id)}/`),
+  // Partial update of an existing customer row. Backend accepts:
+  // title, first_name, surname, email, contact_number, address1, address2,
+  // city_town, county, post_code, country, smartcard_no. Unknown keys 400.
+  update: (id, payload) =>
+    api.put(`/customers/${encodeURIComponent(id)}/update/`, payload),
 
   createDescription: (id, payload) =>
     api.post(`/customers/${encodeURIComponent(id)}/description/`, payload),

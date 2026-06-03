@@ -35,20 +35,49 @@
           <div class="ch-field" aria-hidden="true"></div>
           <div class="ch-field"><label>Case Number</label><span class="readonly-text">{{ caseDetails.caseNumber }}</span></div>
 
-          <div class="ch-field"><label>Offence Date</label><input :value="caseDetails.offenceDate" readonly class="field-readonly" /></div>
-          <div class="ch-field"><label>Case Status</label>
-            <select :value="caseDetails.caseStatus" disabled class="field-readonly">
+          <!-- Offence Date — editable -->
+          <div class="ch-field">
+            <label>Offence Date</label>
+            <input v-if="isEditMode" v-model="editForm.case_dt" type="date" class="field-editable" />
+            <input v-else :value="caseDetails.offenceDate" readonly class="field-readonly" />
+          </div>
+
+          <!-- Case Status — editable (select bound to id, options from statusOptions) -->
+          <div class="ch-field">
+            <label>Case Status</label>
+            <select v-if="isEditMode" v-model="editForm.case_status_id" class="field-editable">
+              <option value="">Please select</option>
+              <option v-for="s in statusOptions" :key="s.case_status_id" :value="s.case_status_id">
+                {{ s.status_desc }}
+              </option>
+            </select>
+            <select v-else :value="caseDetails.caseStatus" disabled class="field-readonly">
               <option>{{ caseDetails.caseStatus }}</option>
             </select>
           </div>
+
           <div class="ch-field"><label>Case Issuer</label><input :value="caseDetails.caseIssuer" readonly class="field-readonly" /></div>
 
-          <div class="ch-field"><label>Closure Reason</label>
-            <select :value="caseDetails.closureReason" disabled class="field-readonly">
-              <option value="">Closure Reason</option>
-            </select>
+          <!-- Closure Reason — editable as free text (no canonical list yet) -->
+          <div class="ch-field">
+            <label>Closure Reason</label>
+            <input
+              v-if="isEditMode"
+              v-model="editForm.closure_reason"
+              type="text"
+              maxlength="200"
+              placeholder="Closure Reason"
+              class="field-editable"
+            />
+            <input v-else :value="caseDetails.closureReason" readonly placeholder="Closure Reason" class="field-readonly" />
           </div>
-          <div class="ch-field"><label>Closure Date</label><input :value="caseDetails.closureDate" readonly placeholder="Closure Date" class="field-readonly" /></div>
+
+          <!-- Closure Date — editable -->
+          <div class="ch-field">
+            <label>Closure Date</label>
+            <input v-if="isEditMode" v-model="editForm.closure_dt" type="date" class="field-editable" />
+            <input v-else :value="caseDetails.closureDate" readonly placeholder="Closure Date" class="field-readonly" />
+          </div>
           <div class="ch-field"><label>Case Type</label>
             <select :value="caseDetails.caseType" disabled class="field-readonly">
               <option>{{ caseDetails.caseType }}</option>
@@ -56,15 +85,18 @@
           </div>
         </div>
 
-        <!-- EDIT button only renders when the route was opened with ?mode=edit
-             (i.e. the user clicked "Edit" in the case list). Plain links
-             open the page in view-only mode — agents browsing the case
-             cannot mutate it from here. -->
-        <div v-if="isEditMode" class="mt-md">
-          <button class="btn-edit" @click="editCase">EDIT</button>
-        </div>
-        <div v-else class="mt-md case-mode-hint">
-          <span class="view-only-pill">View only</span>
+        <!-- Header action bar: EDIT when viewing, SAVE / CANCEL when in
+             edit mode. Read-only fields are intentional — Customer Name,
+             Case Number, Case Issuer, Case Type are identity fields set
+             at creation and aren't editable from here. -->
+        <div class="mt-md case-mode-hint" style="display:flex;gap:8px;">
+          <button v-if="!isEditMode" class="btn-edit" @click="enterEditMode">EDIT</button>
+          <template v-else>
+            <button class="btn-edit" :disabled="savingEdit" @click="saveEdit">
+              {{ savingEdit ? 'SAVING…' : 'SAVE' }}
+            </button>
+            <button class="btn-action-light" :disabled="savingEdit" @click="cancelEdit">CANCEL</button>
+          </template>
         </div>
       </div>
     </div>
@@ -148,43 +180,77 @@
             <legend>Customer</legend>
             <div class="form-row-left">
               <label class="form-label-left">Title</label>
-              <select :value="customer.title" disabled class="field-readonly"><option>{{ customer.title }}</option></select>
+              <select v-if="isEditMode" v-model="customerForm.title" class="field-editable">
+                <option value="">Please Select</option>
+                <option v-for="t in TITLE_OPTIONS" :key="t" :value="t">{{ t }}</option>
+              </select>
+              <select v-else :value="customer.title" disabled class="field-readonly">
+                <option>{{ customer.title }}</option>
+              </select>
 
               <label class="form-label-left">First Name</label>
-              <input :value="customer.firstName" readonly class="field-readonly" />
+              <input v-if="isEditMode" v-model="customerForm.first_name" maxlength="100" class="field-editable" />
+              <input v-else :value="customer.firstName" readonly class="field-readonly" />
 
               <label class="form-label-left">Last Name</label>
-              <input :value="customer.lastName" readonly class="field-readonly" />
+              <input v-if="isEditMode" v-model="customerForm.surname" maxlength="100" class="field-editable" />
+              <input v-else :value="customer.lastName" readonly class="field-readonly" />
 
               <label class="form-label-left">Date of Birth</label>
-              <input :value="customer.dob" readonly class="field-readonly" />
+              <input v-if="isEditMode" v-model="customerForm.date_of_birth" type="date" class="field-editable" />
+              <input v-else :value="customer.dob" readonly class="field-readonly" />
 
               <label class="form-label-left">Age</label>
-              <input :value="customer.age" readonly class="field-readonly" />
+              <!-- Age is derived from DOB; always read-only. -->
+              <input :value="isEditMode ? customerAgeDerived : customer.age" readonly class="field-readonly" />
 
               <label class="form-label-left">Gender</label>
               <div class="radio-row">
-                <label class="radio-item"><input type="radio" :checked="customer.gender === 'Male'" disabled /> Male</label>
-                <label class="radio-item"><input type="radio" :checked="customer.gender === 'Female'" disabled /> Female</label>
-                <label class="radio-item"><input type="radio" :checked="customer.gender === 'Other'" disabled /> Other</label>
+                <label class="radio-item">
+                  <input type="radio" value="Male"
+                         :checked="isEditMode ? customerForm.gender === 'Male' : customer.gender === 'Male'"
+                         :disabled="!isEditMode"
+                         @change="isEditMode && (customerForm.gender = 'Male')" /> Male
+                </label>
+                <label class="radio-item">
+                  <input type="radio" value="Female"
+                         :checked="isEditMode ? customerForm.gender === 'Female' : customer.gender === 'Female'"
+                         :disabled="!isEditMode"
+                         @change="isEditMode && (customerForm.gender = 'Female')" /> Female
+                </label>
+                <label class="radio-item">
+                  <input type="radio" value="Other"
+                         :checked="isEditMode ? customerForm.gender === 'Other' : customer.gender === 'Other'"
+                         :disabled="!isEditMode"
+                         @change="isEditMode && (customerForm.gender = 'Other')" /> Other
+                </label>
               </div>
 
               <label class="form-label-left">Telephone</label>
-              <input :value="customer.telephone" readonly class="field-readonly" />
+              <input v-if="isEditMode" v-model="customerForm.contact_number" maxlength="30" class="field-editable" />
+              <input v-else :value="customer.telephone" readonly class="field-readonly" />
 
               <label class="form-label-left">Mobile Telephone</label>
+              <!-- Legacy schema only has one contact_number column; this stays
+                   read-only and mirrors Telephone — a separate column for mobile
+                   would need a backend migration. -->
               <input :value="customer.mobileTelephone" readonly placeholder="Mobile Number" class="field-readonly" />
 
               <label class="form-label-left">E-mail Address</label>
-              <input :value="customer.email" readonly class="field-readonly" />
+              <input v-if="isEditMode" v-model="customerForm.email" type="email" maxlength="100" class="field-editable" />
+              <input v-else :value="customer.email" readonly class="field-readonly" />
 
               <label class="form-label-left">Employment Status</label>
-              <select :value="customer.employmentStatus" disabled class="field-readonly"><option>{{ customer.employmentStatus }}</option></select>
+              <input v-if="isEditMode" v-model="customerForm.occupation" maxlength="45" placeholder="e.g. Student, Engineer" class="field-editable" />
+              <select v-else :value="customer.employmentStatus" disabled class="field-readonly">
+                <option>{{ customer.employmentStatus }}</option>
+              </select>
 
               <label class="form-label-left">Parent/Guardian</label>
-              <input :value="customer.parentGuardian" readonly class="field-readonly" />
+              <input v-if="isEditMode" v-model="customerForm.parent_guardian" maxlength="200" class="field-editable" />
+              <input v-else :value="customer.parentGuardian" readonly class="field-readonly" />
             </div>
-            <button class="btn-action-light mt-md" @click="showDescription">SHOW DESCRIPTION</button>
+            <button v-if="!isEditMode" class="btn-action-light mt-md" @click="showDescription">SHOW DESCRIPTION</button>
           </fieldset>
 
           <div class="right-stack">
@@ -193,22 +259,37 @@
               <div class="form-row-left">
                 <label class="form-label-left">Postcode</label>
                 <div class="input-with-icon">
-                  <input :value="customer.postcode" readonly class="field-readonly" />
+                  <input v-if="isEditMode" v-model="customerForm.post_code" maxlength="10" class="field-editable" />
+                  <input v-else :value="customer.postcode" readonly class="field-readonly" />
                   <span class="help-icon" title="Postcode lookup">?</span>
                 </div>
 
                 <label class="form-label-left">Address 1</label>
-                <input :value="customer.address1" readonly class="field-readonly" />
+                <input v-if="isEditMode" v-model="customerForm.address1" maxlength="200" class="field-editable" />
+                <input v-else :value="customer.address1" readonly class="field-readonly" />
 
                 <label class="form-label-left">Address 2</label>
-                <input :value="customer.address2" readonly placeholder="Address 2" class="field-readonly" />
+                <input v-if="isEditMode" v-model="customerForm.address2" maxlength="200" placeholder="Address 2" class="field-editable" />
+                <input v-else :value="customer.address2" readonly placeholder="Address 2" class="field-readonly" />
 
                 <label class="form-label-left">Town</label>
-                <input :value="customer.town" readonly class="field-readonly" />
+                <input v-if="isEditMode" v-model="customerForm.city_town" maxlength="200" class="field-editable" />
+                <input v-else :value="customer.town" readonly class="field-readonly" />
               </div>
-              <div class="flex gap-sm mt-md" style="justify-content: space-between">
-                <button class="btn-action-light" @click="enterAddressSearchReference">ENTER ADDRESS SEARCH REFERENCE</button>
-                <button class="btn-action-light" @click="performAddressSearch">PERFORM ADDRESS SEARCH</button>
+              <div v-if="!isEditMode" class="flex gap-sm mt-md" style="justify-content: space-between">
+                <!-- Address-search buttons are stubs while the postcode lookup
+                     on Add Case proves out; disabled here so operators don't
+                     click no-ops. Title attribute explains the state. -->
+                <button class="btn-action-light"
+                        disabled
+                        title="Address search reference is only available on Add Case for now."
+                        style="opacity:0.5;cursor:not-allowed;"
+                        @click.prevent>ENTER ADDRESS SEARCH REFERENCE</button>
+                <button class="btn-action-light"
+                        disabled
+                        title="Postcode lookup is wired on the Add Case screen — coming to Case Detail in a follow-up."
+                        style="opacity:0.5;cursor:not-allowed;"
+                        @click.prevent>PERFORM ADDRESS SEARCH</button>
               </div>
             </fieldset>
 
@@ -216,10 +297,14 @@
               <legend>Manual Verification</legend>
               <div class="form-row-left">
                 <label class="form-label-left">Verification Type</label>
-                <select :value="customer.verificationType" disabled class="field-readonly"><option>{{ customer.verificationType }}</option></select>
+                <input v-if="isEditMode" v-model="customerForm.verification_type" maxlength="45" placeholder="e.g. Bank Statement" class="field-editable" />
+                <select v-else :value="customer.verificationType" disabled class="field-readonly">
+                  <option>{{ customer.verificationType }}</option>
+                </select>
 
                 <label class="form-label-left">Verification Notes</label>
-                <input :value="customer.verificationNotes" readonly class="field-readonly" />
+                <input v-if="isEditMode" v-model="customerForm.additional_info" maxlength="100" class="field-editable" />
+                <input v-else :value="customer.verificationNotes" readonly class="field-readonly" />
               </div>
             </fieldset>
 
@@ -227,11 +312,18 @@
               <legend>Customer signature</legend>
               <div class="form-row-left">
                 <label class="form-label-left">Customer Signature</label>
-                <select :value="customer.customerSignature" disabled class="field-readonly"><option>{{ customer.customerSignature }}</option></select>
+                <select v-if="isEditMode" v-model="customerForm.customer_signature" class="field-editable">
+                  <option value="">Please Select</option>
+                  <option v-for="s in SIGNATURE_OPTIONS" :key="s.value" :value="s.value">{{ s.value }}</option>
+                </select>
+                <select v-else :value="customer.customerSignature" disabled class="field-readonly">
+                  <option>{{ customer.customerSignature }}</option>
+                </select>
               </div>
             </fieldset>
           </div>
         </div>
+
       </div>
 
       <!-- JOURNEY DETAILS / CAR PARK DETAILS -->
@@ -993,10 +1085,214 @@ const router = useRouter()
 const headerOpen = ref(true)
 const activeTab = ref('actions')
 
-// Edit vs view authority — clicking "Edit" from the case list adds
-// ?mode=edit. Every other entry (case-number link, audit drill-in, linked
-// case modal, quick search) opens this view read-only, no EDIT button.
-const isEditMode = computed(() => route.query.mode === 'edit')
+// Edit state — starts true when the route was opened with ?mode=edit
+// (clicking Edit in the case list still works as a deep-link shortcut),
+// otherwise false and toggled via the in-page EDIT button.
+const isEditMode = ref(route.query.mode === 'edit')
+
+// Form buffer for the header card's editable fields. Populated from
+// caseDetails when the operator enters edit mode; written to the backend
+// in saveEdit(); discarded by cancelEdit().
+const editForm = reactive({
+  case_dt:        '',   // ISO yyyy-mm-dd
+  case_status_id: '',
+  closure_reason: '',
+  closure_dt:     '',
+})
+const savingEdit = ref(false)
+
+// Status dropdown options for the in-place edit. Fetched once when the
+// operator enters edit mode for the first time; cached after that.
+const statusOptions = ref([])
+async function ensureStatusOptions() {
+  if (statusOptions.value.length) return
+  try {
+    statusOptions.value = await casesService.listStatuses()
+  } catch (err) {
+    console.warn('[case-detail] could not load statuses for edit dropdown:', err)
+  }
+}
+
+function _toIsoDate(dt) {
+  if (!dt) return ''
+  // Accept either an ISO datetime string or a Date; emit yyyy-mm-dd for
+  // <input type="date">.
+  const d = new Date(dt)
+  if (Number.isNaN(d.getTime())) return ''
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+}
+
+async function enterEditMode() {
+  // Snapshot the current header values + customer values into the edit
+  // buffers so every field comes up prefilled. The user cancels by hitting
+  // CANCEL; nothing displayed is mutated until a save handler runs.
+  editForm.case_dt        = _toIsoDate(_caseRow.value?.case_dt)
+  editForm.case_status_id = _caseRow.value?.case_status_id || ''
+  editForm.closure_reason = _caseRow.value?.closure_reason || ''
+  editForm.closure_dt     = _toIsoDate(_caseRow.value?.closure_dt)
+  _populateCustomerForm()
+  await ensureStatusOptions()
+  isEditMode.value = true
+}
+
+async function saveEdit() {
+  // Single SAVE handler — persists ALL editable sections in one click:
+  // header card (case_dt / status / closure), customer row (name / address /
+  // contact), customer description (DOB / gender / etc), verification, and
+  // signature flags. Each section's call is skipped when no fields apply
+  // (e.g. no customer linked → customer sub-saves are skipped).
+  savingEdit.value = true
+  loadError.value = ''
+  try {
+    // 1. Header card — case-level fields.
+    const headerPayload = {}
+    if (editForm.case_dt)        headerPayload.case_dt        = editForm.case_dt
+    if (editForm.case_status_id) headerPayload.case_status_id = editForm.case_status_id
+    headerPayload.closure_reason = editForm.closure_reason || ''
+    headerPayload.closure_dt     = editForm.closure_dt || ''
+
+    // 2. Signature flags also live on revp_case — merge into the same PUT.
+    const sig = SIGNATURE_OPTIONS.find(s => s.value === customerForm.customer_signature)
+      || { refuse: 0, unable: 0 }
+    headerPayload.refuse_to_sign = sig.refuse
+    headerPayload.unable_to_sign = sig.unable
+
+    await casesService.update(route.params.caseid, headerPayload)
+
+    // 3. Customer-side saves (skip if no customer linked to the case).
+    const customerId = _caseRow.value?.customer_id
+    if (customerId) {
+      await customersService.update(customerId, {
+        title:          customerForm.title,
+        first_name:     customerForm.first_name,
+        surname:        customerForm.surname,
+        email:          customerForm.email,
+        contact_number: customerForm.contact_number,
+        address1:       customerForm.address1,
+        address2:       customerForm.address2,
+        city_town:      customerForm.city_town,
+        post_code:      customerForm.post_code,
+      })
+
+      // Description / verification are append-only — only fire when the
+      // operator actually filled something in.
+      const hasDescChange = customerForm.date_of_birth || customerForm.gender
+        || customerForm.occupation || customerForm.parent_guardian
+      if (hasDescChange) {
+        await customersService.createDescription(customerId, {
+          date_of_birth:   customerForm.date_of_birth || null,
+          gender:          customerForm.gender || null,
+          occupation:      customerForm.occupation || null,
+          parent_guardian: customerForm.parent_guardian || null,
+          customer_age:    customerAgeDerived.value || null,
+        })
+      }
+      if (customerForm.verification_type || customerForm.additional_info) {
+        await casesService.createVerification(route.params.caseid, {
+          verification_type: customerForm.verification_type,
+          additional_info:   customerForm.additional_info,
+        })
+      }
+    }
+
+    // 4. Re-hydrate every tab from the server.
+    await loadCase()
+    isEditMode.value = false
+  } catch (err) {
+    loadError.value = err?.data?.detail || err?.message || 'Failed to save changes.'
+  } finally {
+    savingEdit.value = false
+  }
+}
+
+// saveCustomerDetails removed — the top SAVE button now handles all
+// editable sections in one click. Kept here as a comment so anyone hunting
+// the old name can find the new location: see saveEdit() above.
+
+function cancelEdit() {
+  // caseDetails wasn't touched (editForm was the only buffer) so just
+  // flip back to view mode.
+  isEditMode.value = false
+}
+
+// Holds the raw case row from the last successful GET — used by
+// enterEditMode() to seed the form with ISO date values. caseDetails (the
+// reactive used by the template) has display-formatted dates which don't
+// round-trip into <input type="date">.
+const _caseRow = ref(null)
+
+// ── Customer Details tab edit buffer ──────────────────────────────────────
+// Captures the in-flight values for the Customer Details tab. Saved by
+// saveCustomerDetails() which fires four backend calls in sequence:
+//   1. customersService.update         — customer table (name/contact/address)
+//   2. customersService.createDescription — revp_customer_desc (DOB/gender/etc; append-only)
+//   3. casesService.createVerification — revp_case_verification (append-only)
+//   4. casesService.update             — refuse_to_sign / unable_to_sign on revp_case
+const customerForm = reactive({
+  title: '', first_name: '', surname: '',
+  email: '', contact_number: '',
+  address1: '', address2: '', city_town: '', post_code: '',
+  date_of_birth: '', gender: '', occupation: '', parent_guardian: '',
+  verification_type: '', additional_info: '',
+  customer_signature: '',  // 'Signature provided' | 'Refuse to sign' | 'Unable to sign'
+})
+// customerSaving removed — `savingEdit` (declared near editForm) covers
+// the unified SAVE button now.
+
+// Title dropdown — legacy reads PERSON_TITLE from revp_lookup_data; we use
+// a static list here to avoid an extra fetch on tab entry. Swap for
+// lookupService.listByType('PERSON_TITLE') if you want live data.
+const TITLE_OPTIONS = ['Mr', 'Mrs', 'Miss', 'Ms', 'Dr', 'Master', 'Other']
+
+// Customer signature lookup — three legacy options that map back to two
+// boolean flags on revp_case (refuse_to_sign, unable_to_sign). Empty
+// string = "signed" (both flags clear).
+const SIGNATURE_OPTIONS = [
+  { value: 'Signature provided', refuse: 0, unable: 0 },
+  { value: 'Refuse to sign',     refuse: 1, unable: 0 },
+  { value: 'Unable to sign',     refuse: 0, unable: 1 },
+]
+
+// Age displayed under DOB during edit — re-derived from DOB on every change
+// so the operator can't enter inconsistent values.
+const customerAgeDerived = computed(() => {
+  const dob = customerForm.date_of_birth
+  if (!dob) return ''
+  const d = new Date(dob)
+  if (Number.isNaN(d.getTime())) return ''
+  const now = new Date()
+  let age = now.getFullYear() - d.getFullYear()
+  const m = now.getMonth() - d.getMonth()
+  if (m < 0 || (m === 0 && now.getDate() < d.getDate())) age--
+  return age >= 1 ? age : ''
+})
+
+function _populateCustomerForm() {
+  // Seed the edit buffer from the values currently rendered in the view.
+  // Gender map: customer.gender holds "Male"/"Female"/"Other" — backend
+  // validator accepts those long forms directly, so no remap needed.
+  customerForm.title             = customer.title || ''
+  customerForm.first_name        = customer.firstName || ''
+  customerForm.surname           = customer.lastName || ''
+  customerForm.email             = customer.email || ''
+  customerForm.contact_number    = customer.telephone || ''
+  customerForm.address1          = customer.address1 || ''
+  customerForm.address2          = customer.address2 || ''
+  customerForm.city_town         = customer.town || ''
+  customerForm.post_code         = customer.postcode || ''
+  customerForm.date_of_birth     = _toIsoDate(customer.dob)
+  customerForm.gender            = customer.gender || ''
+  customerForm.occupation        = customer.employmentStatus || ''
+  customerForm.parent_guardian   = customer.parentGuardian || ''
+  customerForm.verification_type = customer.verificationType || ''
+  customerForm.additional_info   = customer.verificationNotes || ''
+  customerForm.customer_signature = customer.customerSignature || ''
+}
+
+// saveCustomerDetails() merged into the single top-level saveEdit() above
+// so the page only has ONE SAVE button. Customer-row update, description
+// append, verification append, and signature flags are all done from
+// saveEdit when isEditMode is on.
 const perPage = ref(10)
 const sortKey = ref('datetime')
 const sortDir = ref('desc')
@@ -1093,6 +1389,10 @@ async function loadCase() {
   journeyError.value   = ''
   try {
     const c = await casesService.get(caseId)
+    // Stash the raw row so enterEditMode() can seed the form with ISO
+    // dates / case_status_id (the display copy in `caseDetails` is
+    // formatted for humans and can't round-trip into <input type="date">).
+    _caseRow.value = c
     // Temp trace — handy when "the details aren't showing" so you can see
     // whether the case row even references a customer / journey.
     // eslint-disable-next-line no-console
@@ -1448,7 +1748,8 @@ function sort(key) {
 }
 function sortIcon(key) { return sortKey.value === key ? (sortDir.value === 'asc' ? '↑' : '↓') : '' }
 
-function editCase()                  { /* TODO: enable edit mode */ }
+// editCase() removed — the header bar now drives mode switching via
+// enterEditMode / saveEdit / cancelEdit instead of a no-op stub.
 function closeAction()               { /* TODO */ }
 function editAction()                { /* TODO */ }
 function addNewAction()              { /* TODO */ }
@@ -1684,6 +1985,23 @@ async function confirmLink() {
 }
 .field-readonly:focus, .field-readonly:hover { border-color: var(--border); box-shadow: none; }
 
+/* Editable input — visibly distinct from the locked variant so the
+   operator knows the header card is in edit mode. */
+.field-editable {
+  background: #fff;
+  color: var(--text-strong);
+  border: 1px solid var(--primary, #5b8def);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  font-size: 12px;
+  width: 100%;
+}
+.field-editable:focus {
+  outline: none;
+  border-color: var(--primary, #5b8def);
+  box-shadow: 0 0 0 2px rgba(91, 141, 239, 0.18);
+}
+
 .tabs-scroll {
   overflow-x: auto;
   flex-wrap: nowrap;
@@ -1850,16 +2168,4 @@ async function confirmLink() {
 :deep(tbody td) { padding: 11px 12px 11px 0; }
 
 .case-mode-hint { display: flex; align-items: center; }
-.view-only-pill {
-  display: inline-block;
-  padding: 4px 12px;
-  background: #f3f4f6;
-  color: #6b7280;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
 </style>

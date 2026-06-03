@@ -10,6 +10,8 @@ export const paymentsService = {
       page_size: String(pageSize),
     })
     if (!includeDeleted) params.set('payment_deleted', 'false')
-    return api.get(`/revp/payments/?${params.toString()}`)
+    // Backend routes the per-case list at /case-payment-list/, not the
+    // bare /revp/payments/ root — the friend's branch renamed it.
+    return api.get(`/revp/payments/case-payment-list/?${params.toString()}`)
   },
 }

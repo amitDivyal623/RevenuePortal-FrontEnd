@@ -27,7 +27,7 @@
           <label class="form-label">Location</label>
           <select v-model="filters.location">
             <option value="">Select Location</option>
-            <option v-for="loc in locations" :key="loc" :value="loc">{{ loc }}</option>
+            <option v-for="loc in locationOptions" :key="loc" :value="loc">{{ loc }}</option>
           </select>
         </div>
       </div>
@@ -70,38 +70,54 @@
               <th @click="sort('dateTimeOfReport')" class="sortable">Date / Time {{ sortIcon('dateTimeOfReport') }}</th>
               <th @click="sort('location')" class="sortable">Location {{ sortIcon('location') }}</th>
               <th @click="sort('headcode')" class="sortable">Headcode {{ sortIcon('headcode') }}</th>
-              <th @click="sort('optPoliceRef')" class="sortable">Police Reference Number {{ sortIcon('optPoliceRef') }}</th>
+              <!-- Police Ref column isn't sortable on the backend (no entry in
+                   the ordering allowlist), so the header is a plain label. -->
+              <th>Police Reference Number</th>
               <th class="col-preview">Report Preview</th>
               <th>Action</th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="row in pagedRows" :key="row.ID" :class="{ 'row-selected': selectedIds.includes(row.ID) }">
-              <td class="col-icon">
-                <input
-                  type="checkbox"
-                  :checked="selectedIds.includes(row.ID)"
-                  @change="toggleRow(row.ID)"
-                  :aria-label="`Select report ${row.ID}`"
-                />
-              </td>
-              <td>{{ row.name }}</td>
-              <td>{{ row.dateTimeOfReport }}</td>
-              <td>{{ row.location }}</td>
-              <td>{{ row.headcode }}</td>
-              <td>{{ row.optPoliceRef }}</td>
-              <td class="col-preview"><div class="report-preview">{{ row.report }}</div></td>
-              <td>
-                <button class="action-btn-green" @click="viewReport(row)">VIEW</button>
+            <tr v-if="loading">
+              <td colspan="8">
+                <div class="empty-state" style="padding:1.5rem 0;color:#6b7280;">Loading…</div>
               </td>
             </tr>
-            <tr v-if="pagedRows.length === 0">
+            <tr v-else-if="error">
+              <td colspan="8">
+                <div class="empty-state">
+                  <div class="empty-state-icon">⚠️</div>
+                  <p class="empty-state-title">Could not load reports</p>
+                  <p class="empty-state-desc">{{ error }}</p>
+                </div>
+              </td>
+            </tr>
+            <tr v-else-if="reports.length === 0">
               <td colspan="8">
                 <div class="empty-state">
                   <div class="empty-state-icon">📋</div>
                   <p class="empty-state-title">No reports found</p>
                   <p class="empty-state-desc">Try adjusting your filters or click RESET.</p>
                 </div>
+              </td>
+            </tr>
+            <tr v-for="row in reports" v-else :key="row.id" :class="{ 'row-selected': selectedIds.includes(row.id) }">
+              <td class="col-icon">
+                <input
+                  type="checkbox"
+                  :checked="selectedIds.includes(row.id)"
+                  @change="toggleRow(row.id)"
+                  :aria-label="`Select report ${row.id}`"
+                />
+              </td>
+              <td>{{ row.name }}</td>
+              <td>{{ fmtDateTime(row.date_time_of_report) }}</td>
+              <td>{{ row.location }}</td>
+              <td>{{ row.headcode }}</td>
+              <td>{{ row.opt_police_ref }}</td>
+              <td class="col-preview"><div class="report-preview">{{ row.report }}</div></td>
+              <td>
+                <button class="action-btn-green" @click="viewReport(row)">VIEW</button>
               </td>
             </tr>
           </tbody>
@@ -125,38 +141,47 @@
         </div>
 
         <div class="modal-body">
-          <div class="modal-form-row">
-            <label class="modal-label">Reference Number</label>
-            <input :value="viewRow?.referenceNumber" type="text" readonly class="field-readonly" />
+          <div v-if="currentLoading" style="padding:1rem;color:#6b7280;text-align:center;">
+            Loading report…
           </div>
-          <div class="modal-form-row">
-            <label class="modal-label">Reporter</label>
-            <input :value="viewRow?.name" type="text" readonly class="field-readonly" />
-          </div>
-          <div class="modal-form-row">
-            <label class="modal-label">Location</label>
-            <input :value="viewRow?.location" type="text" readonly class="field-readonly" />
-          </div>
-          <div class="modal-form-row">
-            <label class="modal-label">Date/Time</label>
-            <input :value="viewRow?.dateTimeOfReport" type="text" readonly class="field-readonly" />
-          </div>
-          <div class="modal-form-row">
-            <label class="modal-label">Headcode</label>
-            <input :value="viewRow?.headcode" type="text" readonly class="field-readonly" />
-          </div>
-          <div class="modal-form-row">
-            <label class="modal-label">Police Reference Number</label>
-            <input :value="viewRow?.optPoliceRef" type="text" readonly placeholder="Police Reference Number" class="field-readonly" />
-          </div>
-          <div class="modal-form-row modal-form-row-top">
-            <label class="modal-label">Report</label>
-            <textarea :value="viewRow?.report" readonly rows="4" class="field-readonly"></textarea>
-          </div>
-          <div class="modal-form-row">
-            <label class="modal-label">Attachments</label>
-            <span class="attachment-text">No Attachment Available</span>
-          </div>
+          <template v-else-if="current">
+            <div class="modal-form-row">
+              <label class="modal-label">Reference Number</label>
+              <input :value="current.cumulative_ref_num" type="text" readonly class="field-readonly" />
+            </div>
+            <div class="modal-form-row">
+              <label class="modal-label">Heading</label>
+              <input :value="current.heading" type="text" readonly class="field-readonly" />
+            </div>
+            <div class="modal-form-row">
+              <label class="modal-label">Reporter</label>
+              <input :value="current.name" type="text" readonly class="field-readonly" />
+            </div>
+            <div class="modal-form-row">
+              <label class="modal-label">Location</label>
+              <input :value="current.location" type="text" readonly class="field-readonly" />
+            </div>
+            <div class="modal-form-row">
+              <label class="modal-label">Date/Time</label>
+              <input :value="fmtDateTime(current.date_time_of_report)" type="text" readonly class="field-readonly" />
+            </div>
+            <div class="modal-form-row">
+              <label class="modal-label">Headcode</label>
+              <input :value="current.headcode" type="text" readonly class="field-readonly" />
+            </div>
+            <div class="modal-form-row">
+              <label class="modal-label">Police Reference Number</label>
+              <input :value="current.opt_police_ref" type="text" readonly placeholder="Police Reference Number" class="field-readonly" />
+            </div>
+            <div class="modal-form-row modal-form-row-top">
+              <label class="modal-label">Report</label>
+              <textarea :value="current.report" readonly rows="4" class="field-readonly"></textarea>
+            </div>
+            <div class="modal-form-row">
+              <label class="modal-label">Attachments</label>
+              <span class="attachment-text">No Attachment Available</span>
+            </div>
+          </template>
         </div>
 
         <div class="modal-footer">
@@ -168,68 +193,82 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive, watch, onUnmounted } from 'vue'
+import { ref, computed, reactive, watch, onMounted, onUnmounted } from 'vue'
+import { storeToRefs } from 'pinia'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { sanitizeString } from '@/utils/security.js'
+import { useIntelReportStore } from '@/store/intel-report.store.js'
 
-const locations = ['Aberdour', 'Aberdeen', 'Aberdare', 'Beton Station', 'Bristol', 'Cardiff', 'Edinburgh', 'Glasgow']
-const reporters = ['Developer Testing', 'J. Smith', 'A. Ansari', 'R. Patel', 'M. Khan']
-const headcodes = ['1D11', '1D22', '1G11', '2A14', '1B05', '']
+// Pinia store fetches from /api/revp/cases/intelligence-reports/ — replaces
+// the 87 hard-coded rows that used to live in this file.
+const intelStore = useIntelReportStore()
+const { reports, total, loading, error, current, currentLoading } = storeToRefs(intelStore)
 
+// ── Filter state ──────────────────────────────────────────────────────────
+// `filters` binds to inputs; `applied` is the last submitted snapshot —
+// keeps every keystroke from re-firing the server query.
 const filters = reactive({ reporter: '', dateFrom: '', dateTo: '', location: '' })
 const applied = reactive({ ...filters })
 
-const perPage = ref(25)
-const currentPage = ref(1)
-const sortKey = ref('name')
-const sortDir = ref('asc')
-const selectedIds = ref([])
+// Server-side controls
+const perPage      = ref(25)
+const currentPage  = ref(1)
+const sortKey      = ref('date_time_of_report')   // backend field name
+const sortDir      = ref('desc')
+const selectedIds  = ref([])
 
-const allRows = ref(Array.from({ length: 87 }, (_, i) => {
-  const dd = String((i % 28) + 1).padStart(2, '0')
-  const mm = String(((i % 12) + 1)).padStart(2, '0')
-  const yyyy = 2022 + (i % 3)
-  const hh = String((i % 24)).padStart(2, '0')
-  const mn = String((i * 7) % 60).padStart(2, '0')
-  const blank = i === 0
-  return {
-    ID: 5000 + i,
-    referenceNumber: `EMR/XZ/${String(2000 + i).padStart(6, '0')}`,
-    name: blank ? '' : reporters[i % reporters.length],
-    dateTimeOfReport: `${dd}/${mm}/${yyyy} ${hh}:${mn}`,
-    location: locations[i % locations.length],
-    headcode: blank ? '' : headcodes[i % headcodes.length],
-    optPoliceRef: i % 7 === 0 ? `PR-${1000 + i}` : '',
-    report: blank ? 'test' : ['hshshshsh', 'bsndndnxjx', 'dnndbd', 'jxjsmdmsms', 'yhgvn', 'hxjdjdjd', 'Suspicious activity reported near platform 3', 'Unverified intel - check CCTV', 'Repeat fare evasion suspect spotted'][i % 9]
-  }
-}))
+// Backend `ordering` value (e.g. "-date_time_of_report"). Only fields in
+// _IR_ORDERING_MAP on the backend are accepted — see selectors.py.
+const orderingParam = computed(() =>
+  (sortDir.value === 'desc' ? '-' : '') + sortKey.value
+)
 
-const filteredRows = computed(() => {
-  return allRows.value.filter(r => {
-    if (applied.reporter && !r.name.toLowerCase().includes(applied.reporter.toLowerCase())) return false
-    if (applied.location && r.location !== applied.location) return false
-    if (applied.dateFrom || applied.dateTo) {
-      const [d, m, y] = r.dateTimeOfReport.split(' ')[0].split('/')
-      const iso = `${y}-${m}-${d}`
-      if (applied.dateFrom && iso < applied.dateFrom) return false
-      if (applied.dateTo   && iso > applied.dateTo)   return false
-    }
-    return true
-  }).sort((a, b) => {
-    const mul = sortDir.value === 'asc' ? 1 : -1
-    const av = a[sortKey.value] ?? ''
-    const bv = b[sortKey.value] ?? ''
-    return av > bv ? mul : -mul
+async function load() {
+  await intelStore.fetchReports({
+    page:      currentPage.value,
+    pageSize:  perPage.value,
+    ordering:  orderingParam.value,
+    dateFrom:  applied.dateFrom,
+    dateTo:    applied.dateTo,
+    location:  applied.location,
+    reporter:  applied.reporter,
   })
+}
+
+// Refetch whenever the operator changes page, page-size, or sort.
+// Filter changes go through applyFilters() which also resets page to 1.
+watch([currentPage, perPage, orderingParam], load)
+
+onMounted(load)
+
+// ── Display helpers ───────────────────────────────────────────────────────
+// Backend sends ISO timestamps; format for the table column.
+function fmtDateTime(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ''
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
+// Distinct locations seen in the current page of results — populates the
+// Location filter dropdown so the operator can narrow down without typing.
+// TODO: swap for stationsService when a project-wide station list endpoint
+// is wired (legacy IR filter was populated from revp_station for the TOC).
+const locationOptions = computed(() => {
+  const set = new Set()
+  for (const r of reports.value) {
+    if (r.location) set.add(r.location)
+  }
+  return [...set].sort()
 })
 
-const totalRecords = computed(() => filteredRows.value.length)
-const totalPages = computed(() => Math.max(1, Math.ceil(totalRecords.value / perPage.value)))
-const rangeStart = computed(() => totalRecords.value === 0 ? 0 : (currentPage.value - 1) * perPage.value + 1)
-const rangeEnd = computed(() => Math.min(currentPage.value * perPage.value, totalRecords.value))
-const pagedRows = computed(() => filteredRows.value.slice(rangeStart.value - 1, rangeEnd.value))
-
-const pageNumbers = computed(() => {
+// ── Pagination metadata ───────────────────────────────────────────────────
+const totalRecords = computed(() => total.value)
+const totalPages   = computed(() => Math.max(1, Math.ceil(totalRecords.value / perPage.value)))
+const rangeStart   = computed(() => totalRecords.value === 0 ? 0 : (currentPage.value - 1) * perPage.value + 1)
+const rangeEnd     = computed(() => Math.min(currentPage.value * perPage.value, totalRecords.value))
+const pageNumbers  = computed(() => {
   const total = totalPages.value, cur = currentPage.value
   const pages = []
   for (let i = 1; i <= total; i++) {
@@ -238,48 +277,80 @@ const pageNumbers = computed(() => {
   return pages.slice(0, 7)
 })
 
+// ── Filters / sort handlers ───────────────────────────────────────────────
 function applyFilters() {
   Object.assign(applied, {
     reporter: sanitizeString(filters.reporter),
     dateFrom: filters.dateFrom,
     dateTo:   filters.dateTo,
-    location: filters.location
+    location: filters.location,
   })
   currentPage.value = 1
   selectedIds.value = []
+  load()
 }
+
 function resetFilters() {
   Object.assign(filters, { reporter: '', dateFrom: '', dateTo: '', location: '' })
   Object.assign(applied, { reporter: '', dateFrom: '', dateTo: '', location: '' })
   currentPage.value = 1
   selectedIds.value = []
+  load()
 }
 
-function sort(key) {
-  if (sortKey.value === key) sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
-  else { sortKey.value = key; sortDir.value = 'asc' }
+// Map of view-side sort key → backend `ordering` enum value. The view's
+// "Police Reference Number" header isn't included because the backend
+// doesn't currently sort on opt_police_ref — keep it as a display column
+// but the column header isn't clickable.
+const SORT_KEY_MAP = {
+  name: 'name',
+  dateTimeOfReport: 'date_time_of_report',
+  location: 'location',
+  headcode: 'headcode',
 }
-function sortIcon(key) { return sortKey.value === key ? (sortDir.value === 'asc' ? '↑' : '↓') : '' }
 
+function sort(viewKey) {
+  const backendKey = SORT_KEY_MAP[viewKey]
+  if (!backendKey) return    // un-sortable column (e.g. police ref)
+  if (sortKey.value === backendKey) {
+    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortKey.value = backendKey
+    sortDir.value = 'asc'
+  }
+}
+
+function sortIcon(viewKey) {
+  const backendKey = SORT_KEY_MAP[viewKey]
+  if (!backendKey || sortKey.value !== backendKey) return ''
+  return sortDir.value === 'asc' ? '↑' : '↓'
+}
+
+// ── Row selection (for future bulk actions like Download Images) ──────────
 function toggleRow(id) {
   const idx = selectedIds.value.indexOf(id)
   idx === -1 ? selectedIds.value.push(id) : selectedIds.value.splice(idx, 1)
 }
 function toggleAll() {
   if (allSelected.value) selectedIds.value = []
-  else selectedIds.value = pagedRows.value.map(r => r.ID)
+  else selectedIds.value = reports.value.map(r => r.id)
 }
-const allSelected = computed(() => pagedRows.value.length > 0 && pagedRows.value.every(r => selectedIds.value.includes(r.ID)))
+const allSelected  = computed(() => reports.value.length > 0 && reports.value.every(r => selectedIds.value.includes(r.id)))
 const someSelected = computed(() => selectedIds.value.length > 0 && !allSelected.value)
 
+// ── View modal — fetches the single-report payload lazily so the modal
+//     can show fields the list response omits (heading, all_affected_tocs,
+//     location_type, staff_email). ────────────────────────────────────────
 const showViewModal = ref(false)
-const viewRow = ref(null)
 
-function viewReport(row) {
-  viewRow.value = row
+async function viewReport(row) {
   showViewModal.value = true
+  await intelStore.fetchOne(row.id)
 }
-function closeViewModal() { showViewModal.value = false }
+function closeViewModal() {
+  showViewModal.value = false
+  intelStore.current = null
+}
 
 function onEscKey(e) {
   if (e.key === 'Escape' && showViewModal.value) closeViewModal()
