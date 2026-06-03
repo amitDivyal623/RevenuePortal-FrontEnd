@@ -15,10 +15,33 @@
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Lookup Type</label>
-          <select v-model="filterType">
-            <option value="">All</option>
-            <option v-for="t in lookupTypes" :key="t.lookup_type_id" :value="t.lookup_type_id">{{ t.name }}</option>
-          </select>
+          <div class="searchable-wrap">
+            <input
+              ref="typeInputRef"
+              type="text"
+              v-model="typeSearch"
+              placeholder="Search types…"
+              autocomplete="off"
+              @focus="openTypeDropdown"
+              @input="openTypeDropdown"
+              @blur="onTypeBlur"
+            />
+            <Teleport to="body">
+              <div v-if="typeDropdownOpen" class="searchable-dropdown-teleport" :style="typeDropdownStyle">
+                <div class="searchable-option searchable-option--clear" @mousedown.prevent="clearTypeFilter">
+                  All types
+                </div>
+                <div v-if="typeOptions.length === 0" class="searchable-empty">No types found</div>
+                <div
+                  v-for="t in typeOptions"
+                  :key="t.lookup_type_id"
+                  class="searchable-option"
+                  :class="{ selected: filterType === t.lookup_type_id }"
+                  @mousedown.prevent="pickType(t)"
+                >{{ t.name }}</div>
+              </div>
+            </Teleport>
+          </div>
         </div>
       </div>
       <div class="flex gap-sm mt-md">
@@ -154,11 +177,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import ConfirmDelete from '@/components/ConfirmDelete.vue'
 import { useLookupValuesStore } from '@/store/lookup-values.store.js'
+import { swal } from '@/utils/swal.js'
 
 const store = useLookupValuesStore()
 
@@ -170,8 +194,22 @@ const loading     = computed(() => store.loading)
 const apiError    = computed(() => store.error)
 const PAGE_SIZE   = store.pageSize
 
+const typeOptions = computed(() => {
+  const q = typeSearch.value.trim().toLowerCase()
+  return q
+    ? lookupTypes.value.filter(t => t.name.toLowerCase().includes(q))
+    : lookupTypes.value
+})
+
 const page        = ref(1)
 const filterType  = ref('')
+
+// ── Filter searchable dropdown ────────────────────────────────────────────────
+const typeSearch        = ref('')
+const typeDropdownOpen  = ref(false)
+const typeInputRef      = ref(null)
+const typeDropdownStyle = ref({})
+
 const modalOpen   = ref(false)
 const modalMode   = ref('add')
 const modalError  = ref('')
@@ -203,10 +241,43 @@ function fetchLookupData() {
   store.fetchAll(buildParams())
 }
 
+// ── Filter dropdown helpers ───────────────────────────────────────────────────
+function calcDropdownStyle(el) {
+  if (!el) return {}
+  const r = el.getBoundingClientRect()
+  return { top: `${r.bottom + 2}px`, left: `${r.left}px`, width: `${r.width}px` }
+}
+
+function openTypeDropdown() {
+  typeDropdownStyle.value = calcDropdownStyle(typeInputRef.value)
+  typeDropdownOpen.value  = true
+}
+
+function pickType(t) {
+  filterType.value      = t.lookup_type_id
+  typeSearch.value      = t.name
+  typeDropdownOpen.value = false
+}
+
+function clearTypeFilter() {
+  filterType.value      = ''
+  typeSearch.value      = ''
+  typeDropdownOpen.value = false
+}
+
+function onTypeBlur() {
+  setTimeout(() => {
+    typeDropdownOpen.value = false
+    typeSearch.value = filterType.value
+      ? (lookupTypes.value.find(t => t.lookup_type_id === filterType.value)?.name ?? '')
+      : ''
+  }, 150)
+}
+
 // ── Search / pagination ───────────────────────────────────────────────────────
 function doSearch()    { page.value = 1; fetchLookupData() }
 function changePage(n) { page.value = n; fetchLookupData() }
-function clearFilters() { filterType.value = ''; page.value = 1; fetchLookupData() }
+function clearFilters() { filterType.value = ''; typeSearch.value = ''; page.value = 1; fetchLookupData() }
 
 // ── Modal helpers ─────────────────────────────────────────────────────────────
 function reset() {
@@ -261,6 +332,9 @@ function validate() {
   return ok
 }
 
+watch(() => form.lookup_type_id, v => { if (errors.lookup_type_id && v) delete errors.lookup_type_id })
+watch(() => form.value,          v => { if (errors.value && v?.trim()) delete errors.value })
+
 // ── Save (create / update) ────────────────────────────────────────────────────
 async function saveValue() {
   if (!validate()) return
@@ -279,6 +353,7 @@ async function saveValue() {
     }
     fetchLookupData()
     closeModal()
+    await swal.success(isAdd ? 'Lookup value created successfully.' : 'Lookup value updated successfully.')
   } catch (err) {
     const data = err?.data
     const firstError = data?.value || data?.lookup_type_id || data?.detail
@@ -305,3 +380,32 @@ onMounted(() => {
   fetchLookupData()
 })
 </script>
+
+<style scoped>
+.searchable-wrap { position: relative; }
+</style>
+
+<style>
+/* Teleported dropdown renders at <body> level — cannot be scoped */
+.searchable-dropdown-teleport {
+  position: fixed;
+  z-index: 9999;
+  background: #fff;
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.searchable-option {
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  color: #111827;
+}
+.searchable-option:hover,
+.searchable-option.selected { background: #f3f4f6; }
+.searchable-option--clear   { color: #6b7280; font-style: italic; }
+.searchable-empty           { padding: 8px 12px; font-size: 13px; color: #9ca3af; }
+</style>

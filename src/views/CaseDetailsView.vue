@@ -239,11 +239,16 @@
            PCN case types carry vehicle_id and we render the Car Park sub-section
            in place of the journey fields. -->
       <div v-show="activeTab === 'journey'">
-        <!-- CAR PARKING DETAILS sub-section — shown when the case row carries vehicle_id.
-             Layout mirrors the legacy CarParkingDetails fuseaction: two columns,
-             four fieldsets (Vehicle details, Offence Times, Offence Location, POPLA). -->
-        <template v-if="hasVehicle">
-          <div class="two-col">
+        <!-- CAR PARKING DETAILS sub-section — shown for every PCN-type case.
+             If the case row carries vehicle_id, render the full Vehicle /
+             Offence Times / Offence Location / POPLA layout. If not, show
+             an explanatory empty-state so the operator knows the Car Park
+             section was left blank when the case was added. -->
+        <template v-if="isPcnCase">
+          <div v-if="!hasVehicle" class="tab-hint tab-hint-info">
+            No car park details were filled in when this PCN case was created.
+          </div>
+          <div v-else class="two-col">
             <div>
               <fieldset class="legend-group">
                 <legend>Vehicle details</legend>
@@ -1374,6 +1379,15 @@ const vehicle = reactive({
   poplaAccepted: false,
 })
 const hasVehicle = computed(() => Boolean(vehicle.vehicleId))
+// PCN cases always belong on the Car Park tab even when no vehicle was
+// recorded — otherwise the operator sees a misleading "JOURNEY DETAILS"
+// label on a case that can never have a journey. Decide off the case type
+// code so the label/section pick the right side regardless of whether
+// the vehicle sub-record exists yet.
+const isPcnCase = computed(() => {
+  const code = (caseDetails.caseType || '').toUpperCase()
+  return code === 'PCN' || code.includes('CAR PARK')
+})
 
 const court = reactive({
   court: '', courtBooking: '', courtReference: '',
@@ -1415,7 +1429,7 @@ onMounted(loadCase)
 const tabs = computed(() => [
   { id: 'actions',     label: 'ACTIONS' },
   { id: 'customer',    label: 'CUSTOMER DETAILS' },
-  { id: 'journey',     label: hasVehicle.value ? 'CAR PARKING DETAILS' : 'JOURNEY DETAILS' },
+  { id: 'journey',     label: isPcnCase.value ? 'CAR PARKING DETAILS' : 'JOURNEY DETAILS' },
   { id: 'offences',    label: 'OFFENCES' },
   { id: 'court',       label: 'COURT/SUMMONS DETAILS' },
   { id: 'payment',     label: 'PAYMENT / DUE' },

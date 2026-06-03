@@ -1,5 +1,5 @@
 <template>
-  <div class="modal-overlay" @click.self="$emit('close')" role="dialog" aria-modal="true" :aria-label="title">
+  <div class="modal-overlay" role="dialog" aria-modal="true" :aria-label="title">
     <div class="modal" :class="`modal-${size}`">
       <div class="modal-header">
         <h2 class="modal-title">{{ title }}</h2>

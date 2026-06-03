@@ -122,7 +122,7 @@
       </fieldset>
 
       <div class="config-footer">
-        <button type="submit" class="btn btn-success" :disabled="saving">{{ saving ? 'Saving…' : 'SAVE' }}</button>
+        <button type="submit" class="btn btn-primary" :disabled="saving">{{ saving ? 'Saving…' : 'Save' }}</button>
       </div>
     </form>
   </AppLayout>

@@ -134,10 +134,11 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import { usePrintTemplatesStore } from '@/store/print-templates.store.js'
+import { swal } from '@/utils/swal.js'
 
 const store = usePrintTemplatesStore()
 onMounted(() => store.init())
@@ -252,6 +253,9 @@ function validate() {
   return ok
 }
 
+watch(() => form.title,    v => { if (errors.title && v?.trim()) delete errors.title })
+watch(() => form.contents, v => { if (errors.contents && v?.trim()) delete errors.contents })
+
 async function saveTpl() {
   if (!validate()) return
   saveError.value = ''
@@ -262,6 +266,7 @@ async function saveTpl() {
       active: form.active,
     })
     closeModal()
+    await swal.success('Print template updated successfully.')
   } catch (e) {
     saveError.value = e.message || 'Failed to save template'
   }

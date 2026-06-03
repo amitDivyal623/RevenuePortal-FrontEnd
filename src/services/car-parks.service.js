@@ -1,27 +1,25 @@
-import { carParks as seedData, stations } from '@/mock/carParkData.js'
+import { api } from '@/services/api.js'
 
-let _carParks = [...seedData]
+const BASE = '/revp/stations'
 
 export const carParksService = {
-  getStations: () => Promise.resolve([...stations]),
-  getAll: () => Promise.resolve([..._carParks]),
-  create: (payload) => {
-    const item = { car_park_id: _uuid(), active: 1, ...payload }
-    _carParks.push(item)
-    return Promise.resolve(item)
+  // Carpark locations
+  getAll: (stationId = '') => {
+    const q = stationId ? `?station_id=${encodeURIComponent(stationId)}` : ''
+    return api.get(`${BASE}/carpark-locations/${q}`)
   },
-  update: (id, payload) => {
-    const item = _carParks.find(c => c.car_park_id === id)
-    if (item) Object.assign(item, payload)
-    return Promise.resolve(item)
-  },
-  remove: (id) => {
-    const item = _carParks.find(c => c.car_park_id === id)
-    if (item) item.active = 0
-    return Promise.resolve()
-  },
-}
 
-function _uuid() {
-  return 'CP-' + (crypto?.randomUUID?.() ?? Math.random().toString(16).slice(2)).slice(0, 8)
+  // create: omit carpark_location_id → backend creates new record
+  create: (payload) => api.post(`${BASE}/carpark-locations/`, payload),
+
+  // update: include carpark_location_id → backend updates existing record
+  update: (id, payload) =>
+    api.post(`${BASE}/carpark-locations/`, { ...payload, carpark_location_id: id }),
+
+  remove: (id) => api.delete(`${BASE}/carpark-locations/${id}/`),
+
+  // All active stations for dropdowns — no pagination cap
+  getStations: () =>
+    api.get(`${BASE}/modal-data/`)
+       .then(data => data.stations ?? []),
 }

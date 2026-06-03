@@ -1,15 +1,21 @@
-import { apiDel, apiGet, apiPost, apiPut } from '@/services/api.js'
+import { api } from '@/services/api.js'
 
 export const emailTemplatesService = {
   getAll: () =>
-    apiGet('/revp/templates/emails/?page_size=100&active=true').then(r => r.results ?? []),
+    api.get('/revp/templates/emails/?page_size=100&active=true').then(r => r.results ?? []),
 
   getReferenceData: () =>
-    apiGet('/revp/templates/emails/modal-data/').then(data => ({
-      // list_case_types returns {type_id, code, description} — normalize to {case_type_id, case_option}
+    api.get('/revp/templates/emails/modal-data/').then(data => ({
+      // Case types come bundled in this endpoint rather than from the
+      // standalone /revp/cases/types/ — but we normalise to the exact same
+      // {case_type_id, code, case_option} shape that caseTypesService.getAll()
+      // produces, so views can swap data sources without changing field names.
+      // Defensive `??` handles both the new shape (case_type_id) and any
+      // legacy responses still in the wild that used type_id.
       caseTypes: (data.case_types ?? []).map(ct => ({
-        case_type_id: ct.type_id ?? ct.case_type_id,
-        case_option: ct.code ?? ct.case_option,
+        case_type_id: ct.case_type_id ?? ct.type_id ?? '',
+        code:         ct.code         ?? '',
+        case_option:  ct.case_option  ?? ct.description ?? '',
       })),
       tocUsers: data.users ?? [],
       letterTemplates: data.letter_templates ?? [],
@@ -18,24 +24,24 @@ export const emailTemplatesService = {
     })),
 
   getOne: (id) =>
-    apiGet(`/revp/templates/emails/${id}/`),
+    api.get(`/revp/templates/emails/${id}/`),
 
   create: (payload) =>
-    apiPost('/revp/templates/emails/create/', payload),
+    api.post('/revp/templates/emails/create/', payload),
 
   update: (id, payload) =>
-    apiPut(`/revp/templates/emails/${id}/`, payload),
+    api.put(`/revp/templates/emails/${id}/`, payload),
 
   remove: (id) =>
-    apiDel(`/revp/templates/emails/${id}/`),
+    api.delete(`/revp/templates/emails/${id}/`),
 
   getLetterTemplates: (caseTypeIds = []) => {
     if (caseTypeIds.length === 0) {
-      return apiGet('/revp/templates/letters/?page_size=100').then(r => r.results ?? [])
+      return api.get('/revp/templates/letters/?page_size=100').then(r => r.results ?? [])
     }
     return Promise.all(
       caseTypeIds.map(id =>
-        apiGet(`/revp/templates/letters/?page_size=100&case_type_id=${encodeURIComponent(id)}`).then(r => r.results ?? [])
+        api.get(`/revp/templates/letters/?page_size=100&case_type_id=${encodeURIComponent(id)}`).then(r => r.results ?? [])
       )
     ).then(results => {
       const seen = new Set()

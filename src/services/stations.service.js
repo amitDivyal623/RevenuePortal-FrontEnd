@@ -1,6 +1,6 @@
 import { api } from '@/services/api.js'
 
-const BASE = '/api/revp/stations'
+const BASE = '/revp/stations'
 
 export const stationsService = {
   // ── List (DataTables endpoint — supports all filters) ──────────────────────
@@ -13,6 +13,8 @@ export const stationsService = {
     if (params.nlc_code)      q.set('nlc_code',      params.nlc_code)
     if (params.service_id)    q.set('service_id',    params.service_id)
     if (params.casetype_yes)  q.set('casetype_yes',  params.casetype_yes)
+    if (params.casetype_no)   q.set('casetype_no',   params.casetype_no)
+    if (params.not_entry)     q.set('not_entry',     params.not_entry)
     if (params.ordering)      q.set('ordering',      params.ordering)
     return api.get(`${BASE}/datatable/?${q}`)
   },
@@ -25,9 +27,6 @@ export const stationsService = {
 
   // ── Update ─────────────────────────────────────────────────────────────────
   update: (stationId, payload) => api.put(`${BASE}/${stationId}/`, payload),
-
-  // ── Soft-delete ────────────────────────────────────────────────────────────
-  delete: (stationId) => api.delete(`${BASE}/${stationId}/`),
 
   // ── Duplicate check ────────────────────────────────────────────────────────
   check: (payload) => api.post(`${BASE}/check/`, payload),
@@ -43,13 +42,23 @@ export const stationsService = {
   // ── Modal bootstrap data (service types, case types, next order) ───────────
   modalData: () => api.get(`${BASE}/modal-data/`),
 
-  // ── Case type mappings for a single station ────────────────────────────────
+  // ── Case type mappings for a single station ───────────────────────────────
   updateCaseTypes: (stationId, updates) =>
     api.post(`${BASE}/${stationId}/casetype/`, { updates }),
 
-  // ── Service types ──────────────────────────────────────────────────────────
-  listServiceTypes: () => api.get(`${BASE}/service-types/`),
+  // ── Service type assignment for a station ─────────────────────────────────
+  assignServiceType: (stationId, serviceTypeId) =>
+    api.post(`${BASE}/${stationId}/service-type/`, { service_type_id: serviceTypeId }),
 
-  // ── TOC case types ─────────────────────────────────────────────────────────
-  listCaseTypes: () => api.get(`${BASE}/case-types/`),
+  removeServiceType: (stationId) =>
+    api.delete(`${BASE}/${stationId}/service-type/`),
+
+  // ── Column order / visibility preferences ─────────────────────────────────
+  getColumnOrder: () => api.get(`${BASE}/column-order/`),
+
+  saveColumnOrder: (columnOrder, columnVisibility) =>
+    api.post(`${BASE}/column-order/`, {
+      station_column_order: columnOrder,
+      station_column_visibility: columnVisibility ?? null,
+    }),
 }

@@ -3,43 +3,46 @@ import { ref } from 'vue'
 import { carParksService } from '@/services/car-parks.service.js'
 
 export const useCarParksStore = defineStore('carParks', () => {
-  const carParks = ref([])
-  const stations = ref([])
-  const loading = ref(false)
+  const carParks  = ref([])
+  const stations  = ref([])
+  const loading   = ref(false)
+  const error     = ref('')
 
-  async function init() {
+  async function loadStations() {
+    stations.value = await carParksService.getStations()
+  }
+
+  async function fetchAll(stationId = '') {
     loading.value = true
+    error.value   = ''
     try {
-      const [all, stList] = await Promise.all([
-        carParksService.getAll(),
-        carParksService.getStations(),
-      ])
-      carParks.value = all
-      stations.value = stList
+      carParks.value = await carParksService.getAll(stationId)
+    } catch (err) {
+      error.value = err?.data?.detail || err?.message || 'Failed to load car park locations.'
+      carParks.value = []
     } finally {
       loading.value = false
     }
   }
 
+  async function init() {
+    await Promise.all([fetchAll(), loadStations()])
+  }
+
   async function createCarPark(payload) {
-    const item = await carParksService.create(payload)
-    carParks.value.push(item)
+    return carParksService.create(payload)
   }
 
   async function updateCarPark(id, payload) {
-    await carParksService.update(id, payload)
-    const item = carParks.value.find(c => c.car_park_id === id)
-    if (item) Object.assign(item, payload)
+    return carParksService.update(id, payload)
   }
 
   async function removeCarPark(id) {
-    await carParksService.remove(id)
-    const item = carParks.value.find(c => c.car_park_id === id)
-    if (item) item.active = 0
+    return carParksService.remove(id)
   }
 
   return {
-    carParks, stations, loading,
-    init, createCarPark, updateCarPark, removeCarPark,
+    carParks, stations, loading, error,
+    init, fetchAll, loadStations, createCarPark, updateCarPark, removeCarPark,
   }
 })

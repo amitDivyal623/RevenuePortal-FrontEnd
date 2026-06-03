@@ -200,6 +200,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import ConfirmDelete from '@/components/ConfirmDelete.vue'
 import { useLetterTemplatesStore } from '@/store/letter-templates.store.js'
+import { swal } from '@/utils/swal.js'
 
 const store = useLetterTemplatesStore()
 onMounted(() => store.init())
@@ -312,12 +313,14 @@ async function saveTpl(){
 
   saveError.value = ''
   try {
-    if(modalMode.value==='add'){
+    const isAdd = modalMode.value === 'add'
+    if(isAdd){
       await store.createTemplate(fd)
     } else {
       await store.updateTemplate(form.letter_template_id, fd)
     }
     closeModal()
+    await swal.success(isAdd ? 'Letter template created successfully.' : 'Letter template updated successfully.')
   } catch(err) {
     const data = err.data
     let msg = 'Save failed. Please try again.'

@@ -17,13 +17,32 @@
       <div class="card-title">Action Template Filters</div>
       <div class="form-row">
         <div class="form-group">
-          <label class="form-label" for="caseTypeFilter">Case Type</label>
-          <select id="caseTypeFilter" v-model="filterCaseTypeId">
-            <option value="">All case types</option>
-            <option v-for="ct in caseTypes" :key="ct.case_type_id" :value="ct.case_type_id" :title="ct.code">
-              {{ ct.case_option }} ({{ ct.code }})
-            </option>
-          </select>
+          <label class="form-label">Case Type</label>
+          <div class="searchable-wrap">
+            <input
+              ref="caseTypeInputRef"
+              type="text"
+              v-model="caseTypeSearch"
+              placeholder="Search case types…"
+              autocomplete="off"
+              @focus="openCaseTypeDropdown"
+              @input="openCaseTypeDropdown"
+              @blur="onCaseTypeBlur"
+            />
+            <Teleport to="body">
+              <div v-if="caseTypeDropdownOpen" class="searchable-dropdown-teleport" :style="caseTypeDropdownStyle">
+                <div class="searchable-option searchable-option--clear" @mousedown.prevent="clearCaseTypeFilter">All case types</div>
+                <div v-if="caseTypeOptions.length === 0" class="searchable-empty">No case types found</div>
+                <div
+                  v-for="ct in caseTypeOptions"
+                  :key="ct.case_type_id"
+                  class="searchable-option"
+                  :class="{ selected: pendingCaseTypeId === ct.case_type_id }"
+                  @mousedown.prevent="pickCaseType(ct)"
+                >{{ ct.case_option }} ({{ ct.code }})</div>
+              </div>
+            </Teleport>
+          </div>
           <span v-if="caseTypeError" class="form-error" role="alert">{{ caseTypeError }}</span>
         </div>
       </div>
@@ -55,6 +74,7 @@
           <thead>
             <tr>
               <th @click="sort('name')" class="sortable">Workflow Action {{ sortIcon('name') }}</th>
+              <th>Case Type</th>
               <th @click="sort('instruction')" class="sortable">Instruction {{ sortIcon('instruction') }}</th>
               <th>Work From</th>
               <th @click="sort('days_offset')" class="sortable" style="text-align:right">Offset {{ sortIcon('days_offset') }}</th>
@@ -63,7 +83,7 @@
           </thead>
           <tbody>
             <tr v-if="pagedRows.length === 0">
-              <td colspan="5">
+              <td colspan="6">
                 <div class="empty-state">
                   <div class="empty-state-icon">📋</div>
                   <p class="empty-state-title">No action templates found</p>
@@ -73,6 +93,7 @@
             </tr>
             <tr v-for="row in pagedRows" :key="row.action_template_id">
               <td><strong>{{ row.name }}</strong></td>
+              <td><span class="badge badge-primary">{{ caseTypeName(row.case_type_id) }}</span></td>
               <td class="text-muted">{{ row.instruction }}</td>
               <td>
                 <span v-if="row.work_from_date === 1" class="badge badge-warning">*Offence Date*</span>
@@ -104,7 +125,7 @@
     </div>
 
     <!-- Add / Edit modal -->
-    <div v-if="modalOpen" class="modal-overlay" @click.self="closeModal" role="dialog" aria-modal="true" :aria-label="modalTitle">
+    <div v-if="modalOpen" class="modal-overlay" role="dialog" aria-modal="true" :aria-label="modalTitle">
       <div class="modal modal-lg">
         <div class="modal-header">
           <h2 class="modal-title">{{ modalTitle }}</h2>
@@ -273,7 +294,7 @@
     </div>
 
     <!-- Delete confirmation modal -->
-    <div v-if="deleteOpen" class="modal-overlay" @click.self="deleteOpen=false" role="dialog" aria-modal="true">
+    <div v-if="deleteOpen" class="modal-overlay" role="dialog" aria-modal="true">
       <div class="modal modal-sm">
         <div class="modal-header">
           <h2 class="modal-title">Confirm Delete</h2>
@@ -300,6 +321,7 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { useActionTemplateStore } from '@/store/action-template.store.js'
+import { swal } from '@/utils/swal.js'
 
 const store = useActionTemplateStore()
 
@@ -321,8 +343,61 @@ onMounted(async () => {
   await store.fetchTemplates()
 })
 
-const filterCaseTypeId = ref('')
+const filterCaseTypeId  = ref('')  // applied filter (updated only on Search click)
+const pendingCaseTypeId = ref('')  // dropdown selection (intermediate)
 const caseTypeError = ref('')
+
+// ── Case Type searchable dropdown ────────────────────────────────────────────
+const caseTypeSearch        = ref('')
+const caseTypeDropdownOpen  = ref(false)
+const caseTypeInputRef      = ref(null)
+const caseTypeDropdownStyle = ref({})
+
+const caseTypeOptions = computed(() => {
+  const q = caseTypeSearch.value.trim().toLowerCase()
+  return q
+    ? caseTypes.value.filter(ct =>
+        ct.case_option.toLowerCase().includes(q) || ct.code.toLowerCase().includes(q)
+      )
+    : caseTypes.value
+})
+
+function calcCTDropdownStyle(el) {
+  if (!el) return {}
+  const r = el.getBoundingClientRect()
+  return { top: `${r.bottom + 2}px`, left: `${r.left}px`, width: `${r.width}px` }
+}
+
+function openCaseTypeDropdown() {
+  caseTypeDropdownStyle.value = calcCTDropdownStyle(caseTypeInputRef.value)
+  caseTypeDropdownOpen.value  = true
+}
+
+function pickCaseType(ct) {
+  pendingCaseTypeId.value    = ct.case_type_id
+  caseTypeSearch.value       = `${ct.case_option} (${ct.code})`
+  caseTypeDropdownOpen.value = false
+}
+
+function clearCaseTypeFilter() {
+  pendingCaseTypeId.value    = ''
+  caseTypeSearch.value       = ''
+  caseTypeDropdownOpen.value = false
+}
+
+function onCaseTypeBlur() {
+  setTimeout(() => {
+    caseTypeDropdownOpen.value = false
+    const ct = caseTypes.value.find(c => c.case_type_id === pendingCaseTypeId.value)
+    caseTypeSearch.value = ct ? `${ct.case_option} (${ct.code})` : ''
+  }, 150)
+}
+
+function caseTypeName(id) {
+  if (!id) return '—'
+  const ct = caseTypes.value.find(c => c.case_type_id === id)
+  return ct ? `${ct.case_option} (${ct.code})` : id
+}
 
 const page = ref(1)
 const perPage = ref(10)
@@ -455,12 +530,15 @@ function sortIcon(k) { return sortKey.value === k ? (sortDir.value === 'asc' ? '
 
 /* ───────────── Filter actions ───────────── */
 function search() {
-  caseTypeError.value = ''
+  caseTypeError.value    = ''
+  filterCaseTypeId.value = pendingCaseTypeId.value
   page.value = 1
 }
 function clearFilters() {
-  filterCaseTypeId.value = ''
-  caseTypeError.value = ''
+  filterCaseTypeId.value  = ''
+  pendingCaseTypeId.value = ''
+  caseTypeSearch.value    = ''
+  caseTypeError.value     = ''
   page.value = 1
 }
 
@@ -608,6 +686,7 @@ async function saveAction() {
   if (!validate()) return
   savePending.value = true
   formError.value = ''
+  const isEdit = modalMode.value === 'edit'
 
   const payload = {
     case_type_id:           form.case_type_id,
@@ -628,12 +707,13 @@ async function saveAction() {
   }
 
   try {
-    if (modalMode.value === 'edit') {
+    if (isEdit) {
       await store.updateTemplate(form.action_template_id, payload)
     } else {
       await store.createTemplate(payload)
     }
     closeModal()
+    await swal.success(isEdit ? 'Action template updated successfully.' : 'Action template created successfully.')
   } catch (err) {
     formError.value = err?.data?.detail || err?.message || 'Save failed. Please try again.'
   } finally {
@@ -644,6 +724,7 @@ async function saveAction() {
 
 <style scoped>
 .req { color: var(--danger); margin-left: 2px; }
+.searchable-wrap { position: relative; }
 
 /* Inline toggle rows */
 .inline-row { flex-direction: row; align-items: center; justify-content: space-between; }
@@ -737,4 +818,29 @@ async function saveAction() {
 @media (max-width: 720px) {
   .modal-body.two-col { grid-template-columns: 1fr; }
 }
+</style>
+
+<style>
+/* Teleported dropdown — cannot be scoped */
+.searchable-dropdown-teleport {
+  position: fixed;
+  z-index: 9999;
+  background: #fff;
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.searchable-option {
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  color: #111827;
+}
+.searchable-option:hover,
+.searchable-option.selected { background: #f3f4f6; }
+.searchable-option--clear   { color: #6b7280; font-style: italic; }
+.searchable-empty           { padding: 8px 12px; font-size: 13px; color: #9ca3af; }
 </style>

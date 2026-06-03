@@ -16,35 +16,77 @@
     <div class="card card-padded mb-lg">
       <div class="card-title">Ticket Pad Filters</div>
       <div class="form-row">
+        <!-- Case Type -->
         <div class="form-group">
-          <label class="form-label" for="fCaseType">Case Type</label>
-          <select id="fCaseType" v-model="filterCaseType">
-            <option value="">All case types</option>
-            <option v-for="ct in caseTypes" :key="ct.case_type_id" :value="ct.case_type_id">
-              {{ ct.case_option }}
-            </option>
-          </select>
+          <label class="form-label">Case Type</label>
+          <div class="searchable-wrap">
+            <input ref="caseTypeInputRef" type="text" v-model="caseTypeSearch"
+              placeholder="Search case types…" autocomplete="off"
+              @focus="openCaseTypeDropdown" @input="openCaseTypeDropdown" @blur="onCaseTypeBlur" />
+            <Teleport to="body">
+              <div v-if="caseTypeDropdownOpen" class="searchable-dropdown-teleport" :style="caseTypeDropdownStyle">
+                <div class="searchable-option searchable-option--clear" @mousedown.prevent="clearCaseTypeFilter">All case types</div>
+                <div v-if="caseTypeOptions.length === 0" class="searchable-empty">No case types found</div>
+                <div v-for="ct in caseTypeOptions" :key="ct.case_type_id"
+                  class="searchable-option" :class="{ selected: filterCaseType === ct.case_type_id }"
+                  @mousedown.prevent="pickCaseType(ct)">{{ ct.description }} ({{ ct.code }})</div>
+              </div>
+            </Teleport>
+          </div>
         </div>
+        <!-- Entered By -->
         <div class="form-group">
-          <label class="form-label" for="fEnteredBy">Entered By</label>
-          <select id="fEnteredBy" v-model="filterEnteredBy">
-            <option value="">Select Enter By</option>
-            <option v-for="u in tocUsers" :key="`fe-${u.UserID}`" :value="u.UserID">{{ u.Username }}</option>
-          </select>
+          <label class="form-label">Entered By</label>
+          <div class="searchable-wrap">
+            <input ref="enteredByInputRef" type="text" v-model="enteredBySearch"
+              placeholder="Search entered by…" autocomplete="off"
+              @focus="openEnteredByDropdown" @input="openEnteredByDropdown" @blur="onEnteredByBlur" />
+            <Teleport to="body">
+              <div v-if="enteredByDropdownOpen" class="searchable-dropdown-teleport" :style="enteredByDropdownStyle">
+                <div class="searchable-option searchable-option--clear" @mousedown.prevent="clearEnteredByFilter">All users</div>
+                <div v-if="enteredByOptions.length === 0" class="searchable-empty">No users found</div>
+                <div v-for="u in enteredByOptions" :key="u.UserID"
+                  class="searchable-option" :class="{ selected: filterEnteredBy === u.UserID }"
+                  @mousedown.prevent="pickEnteredBy(u)">{{ u.Username }}</div>
+              </div>
+            </Teleport>
+          </div>
         </div>
+        <!-- Issued By -->
         <div class="form-group">
-          <label class="form-label" for="fIssuedBy">Issued By</label>
-          <select id="fIssuedBy" v-model="filterIssuedBy">
-            <option value="">Select Issued By</option>
-            <option v-for="i in padIssuers" :key="i.lookup_data_id" :value="i.lookup_data_id">{{ i.lookup_data_value }}</option>
-          </select>
+          <label class="form-label">Issued By</label>
+          <div class="searchable-wrap">
+            <input ref="issuedByInputRef" type="text" v-model="issuedBySearch"
+              placeholder="Search issued by…" autocomplete="off"
+              @focus="openIssuedByDropdown" @input="openIssuedByDropdown" @blur="onIssuedByBlur" />
+            <Teleport to="body">
+              <div v-if="issuedByDropdownOpen" class="searchable-dropdown-teleport" :style="issuedByDropdownStyle">
+                <div class="searchable-option searchable-option--clear" @mousedown.prevent="clearIssuedByFilter">All issuers</div>
+                <div v-if="issuedByOptions.length === 0" class="searchable-empty">No issuers found</div>
+                <div v-for="i in issuedByOptions" :key="i.lookup_data_id"
+                  class="searchable-option" :class="{ selected: filterIssuedBy === i.lookup_data_id }"
+                  @mousedown.prevent="pickIssuedBy(i)">{{ i.lookup_data_value }}</div>
+              </div>
+            </Teleport>
+          </div>
         </div>
+        <!-- Issued To -->
         <div class="form-group">
-          <label class="form-label" for="fIssuedTo">Issued To</label>
-          <select id="fIssuedTo" v-model="filterIssuedTo">
-            <option value="">Select Issued To</option>
-            <option v-for="u in tocUsers" :key="`fi-${u.UserID}`" :value="u.UserID">{{ u.Username }}</option>
-          </select>
+          <label class="form-label">Issued To</label>
+          <div class="searchable-wrap">
+            <input ref="issuedToInputRef" type="text" v-model="issuedToSearch"
+              placeholder="Search issued to…" autocomplete="off"
+              @focus="openIssuedToDropdown" @input="openIssuedToDropdown" @blur="onIssuedToBlur" />
+            <Teleport to="body">
+              <div v-if="issuedToDropdownOpen" class="searchable-dropdown-teleport" :style="issuedToDropdownStyle">
+                <div class="searchable-option searchable-option--clear" @mousedown.prevent="clearIssuedToFilter">All users</div>
+                <div v-if="issuedToOptions.length === 0" class="searchable-empty">No users found</div>
+                <div v-for="u in issuedToOptions" :key="u.UserID"
+                  class="searchable-option" :class="{ selected: filterIssuedTo === u.UserID }"
+                  @mousedown.prevent="pickIssuedTo(u)">{{ u.Username }}</div>
+              </div>
+            </Teleport>
+          </div>
         </div>
       </div>
       <div class="flex gap-sm mt-md">
@@ -57,10 +99,10 @@
     <div class="card card-padded">
       <div class="flex justify-between items-center mb-md">
         <div class="card-title" style="margin-bottom:0">
-          Matching Ticket Pads ({{ filteredPads.length }})
+          Matching Ticket Pads ({{ total }})
         </div>
         <div class="flex items-center gap-sm">
-          <span class="text-sm text-light">{{ filteredPads.length }} entries</span>
+          <span class="text-sm text-light">{{ total }} entries</span>
           <select v-model.number="perPage" style="width:auto;padding:5px 10px;font-size:12px">
             <option :value="10">10</option>
             <option :value="25">25</option>
@@ -129,20 +171,24 @@
         </table>
       </div>
 
-      <div class="pagination" v-if="totalPages > 1">
-        <button class="page-btn" :disabled="page === 1" @click="page--">‹ Prev</button>
-        <button
-          v-for="p in totalPages" :key="p"
-          class="page-btn" :class="{ active: p === page }"
-          @click="page = p"
-        >{{ p }}</button>
-        <button class="page-btn" :disabled="page === totalPages" @click="page++">Next ›</button>
-        <span class="page-meta">{{ filteredPads.length }} total</span>
+      <div v-if="total > 0" class="flex justify-between items-center mt-md">
+        <span class="text-sm text-muted">
+          Showing {{ pageStart }}–{{ pageEnd }} of {{ total }}
+        </span>
+        <div v-if="totalPages > 1" class="pagination" style="margin-top:0">
+          <button class="page-btn" :disabled="page === 1" @click="changePage(page - 1)">‹ Prev</button>
+          <button
+            v-for="p in totalPages" :key="p"
+            class="page-btn" :class="{ active: p === page }"
+            @click="changePage(p)"
+          >{{ p }}</button>
+          <button class="page-btn" :disabled="page === totalPages" @click="changePage(page + 1)">Next ›</button>
+        </div>
       </div>
     </div>
 
     <!-- Add / Edit modal -->
-    <div v-if="modalOpen" class="modal-overlay" @click.self="closeModal" role="dialog" aria-modal="true" :aria-label="modalTitle">
+    <div v-if="modalOpen" class="modal-overlay" role="dialog" aria-modal="true" :aria-label="modalTitle">
       <div class="modal modal-lg">
         <div class="modal-header">
           <h2 class="modal-title">{{ modalTitle }}</h2>
@@ -210,7 +256,7 @@
                 <label class="form-label" for="m-casetype">Case Type <span class="req">*</span></label>
                 <select id="m-casetype" v-model="form.case_type_id" :disabled="isFieldDisabled">
                   <option value="">Select Case Type</option>
-                  <option v-for="ct in caseTypes" :key="ct.case_type_id" :value="ct.case_type_id">{{ ct.case_option }}</option>
+                  <option v-for="ct in caseTypes" :key="ct.case_type_id" :value="ct.case_type_id">{{ ct.description }} ({{ ct.code }})</option>
                 </select>
                 <span v-if="errors.case_type_id" class="form-error">{{ errors.case_type_id }}</span>
               </div>
@@ -253,6 +299,7 @@
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { useTicketPadsStore } from '@/store/ticket-pads.store.js'
+import { swal } from '@/utils/swal.js'
 
 const store = useTicketPadsStore()
 onMounted(() => store.init())
@@ -268,11 +315,48 @@ const filterEnteredBy = ref('')
 const filterIssuedBy  = ref('')
 const filterIssuedTo  = ref('')
 
-// Applied only on Search click — dropdowns alone do not trigger filtering
-const appliedCaseType  = ref('')
-const appliedEnteredBy = ref('')
-const appliedIssuedBy  = ref('')
-const appliedIssuedTo  = ref('')
+// total result count from the last server fetch
+const total = computed(() => store.total)
+
+// ── Searchable dropdown state ─────────────────────────────────────────────────
+const caseTypeSearch        = ref(''); const caseTypeDropdownOpen  = ref(false)
+const caseTypeInputRef      = ref(null); const caseTypeDropdownStyle = ref({})
+
+const enteredBySearch        = ref(''); const enteredByDropdownOpen  = ref(false)
+const enteredByInputRef      = ref(null); const enteredByDropdownStyle = ref({})
+
+const issuedBySearch        = ref(''); const issuedByDropdownOpen  = ref(false)
+const issuedByInputRef      = ref(null); const issuedByDropdownStyle = ref({})
+
+const issuedToSearch        = ref(''); const issuedToDropdownOpen  = ref(false)
+const issuedToInputRef      = ref(null); const issuedToDropdownStyle = ref({})
+
+const caseTypeOptions  = computed(() => { const q = caseTypeSearch.value.trim().toLowerCase(); return q ? caseTypes.value.filter(ct => ct.code.toLowerCase().includes(q) || (ct.description ?? '').toLowerCase().includes(q)) : caseTypes.value })
+const enteredByOptions = computed(() => { const q = enteredBySearch.value.trim().toLowerCase(); return q ? tocUsers.value.filter(u => u.Username.toLowerCase().includes(q)) : tocUsers.value })
+const issuedByOptions  = computed(() => { const q = issuedBySearch.value.trim().toLowerCase(); return q ? padIssuers.value.filter(i => i.lookup_data_value.toLowerCase().includes(q)) : padIssuers.value })
+const issuedToOptions  = computed(() => { const q = issuedToSearch.value.trim().toLowerCase(); return q ? tocUsers.value.filter(u => u.Username.toLowerCase().includes(q)) : tocUsers.value })
+
+function calcDropdownStyle(el) { if (!el) return {}; const r = el.getBoundingClientRect(); return { top: `${r.bottom + 2}px`, left: `${r.left}px`, width: `${r.width}px` } }
+
+function openCaseTypeDropdown()  { caseTypeDropdownStyle.value  = calcDropdownStyle(caseTypeInputRef.value);  caseTypeDropdownOpen.value  = true }
+function openEnteredByDropdown() { enteredByDropdownStyle.value = calcDropdownStyle(enteredByInputRef.value); enteredByDropdownOpen.value = true }
+function openIssuedByDropdown()  { issuedByDropdownStyle.value  = calcDropdownStyle(issuedByInputRef.value);  issuedByDropdownOpen.value  = true }
+function openIssuedToDropdown()  { issuedToDropdownStyle.value  = calcDropdownStyle(issuedToInputRef.value);  issuedToDropdownOpen.value  = true }
+
+function pickCaseType(ct)  { filterCaseType.value  = ct.case_type_id;     caseTypeSearch.value  = `${ct.description} (${ct.code})`;   caseTypeDropdownOpen.value  = false }
+function pickEnteredBy(u)  { filterEnteredBy.value = u.UserID;            enteredBySearch.value = u.Username;              enteredByDropdownOpen.value = false }
+function pickIssuedBy(i)   { filterIssuedBy.value  = i.lookup_data_id;   issuedBySearch.value  = i.lookup_data_value;      issuedByDropdownOpen.value  = false }
+function pickIssuedTo(u)   { filterIssuedTo.value  = u.UserID;            issuedToSearch.value  = u.Username;              issuedToDropdownOpen.value  = false }
+
+function clearCaseTypeFilter()  { filterCaseType.value  = ''; caseTypeSearch.value  = ''; caseTypeDropdownOpen.value  = false }
+function clearEnteredByFilter() { filterEnteredBy.value = ''; enteredBySearch.value = ''; enteredByDropdownOpen.value = false }
+function clearIssuedByFilter()  { filterIssuedBy.value  = ''; issuedBySearch.value  = ''; issuedByDropdownOpen.value  = false }
+function clearIssuedToFilter()  { filterIssuedTo.value  = ''; issuedToSearch.value  = ''; issuedToDropdownOpen.value  = false }
+
+function onCaseTypeBlur()  { setTimeout(() => { caseTypeDropdownOpen.value  = false; const ct = caseTypes.value.find(c => c.case_type_id === filterCaseType.value);         caseTypeSearch.value  = ct ? `${ct.description} (${ct.code})` : '' }, 150) }
+function onEnteredByBlur() { setTimeout(() => { enteredByDropdownOpen.value = false; const u  = tocUsers.value.find(u => u.UserID === filterEnteredBy.value);               enteredBySearch.value = u?.Username ?? '' }, 150) }
+function onIssuedByBlur()  { setTimeout(() => { issuedByDropdownOpen.value  = false; const i  = padIssuers.value.find(i => i.lookup_data_id === filterIssuedBy.value);      issuedBySearch.value  = i?.lookup_data_value ?? '' }, 150) }
+function onIssuedToBlur()  { setTimeout(() => { issuedToDropdownOpen.value  = false; const u  = tocUsers.value.find(u => u.UserID === filterIssuedTo.value);               issuedToSearch.value  = u?.Username ?? '' }, 150) }
 
 const page = ref(1)
 const perPage = ref(10)
@@ -306,29 +390,23 @@ const isFieldDisabled = computed(() =>
   modalMode.value === 'edit' && form.disabledFlag
 )
 
-/* ───────────── Filtering / sorting / paging ───────────── */
-const filteredPads = computed(() =>
-  pads.value.filter(p =>
-    (!appliedCaseType.value  || p.case_type_id === appliedCaseType.value) &&
-    (!appliedEnteredBy.value || p.CreatedBy    === appliedEnteredBy.value) &&
-    (!appliedIssuedBy.value  || p.issuedBy     === appliedIssuedBy.value) &&
-    (!appliedIssuedTo.value  || p.issuedTo     === appliedIssuedTo.value)
-  )
-)
+/* ───────────── Sorting / paging (server does filtering) ───────────── */
 
+// Sort the current server-fetched page client-side
 const sortedPads = computed(() => {
   const mul = sortDir.value === 'asc' ? 1 : -1
-  return [...filteredPads.value].sort((a, b) => {
+  return [...pads.value].sort((a, b) => {
     const va = a[sortKey.value], vb = b[sortKey.value]
     if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * mul
     return String(va ?? '').localeCompare(String(vb ?? '')) * mul
   })
 })
 
-const totalPages = computed(() => Math.max(1, Math.ceil(sortedPads.value.length / perPage.value)))
-const pagedRows  = computed(() => sortedPads.value.slice((page.value - 1) * perPage.value, page.value * perPage.value))
-
-watch(filteredPads, () => { if (page.value > totalPages.value) page.value = totalPages.value })
+// Server-side pagination — pagedRows IS the full current page from the server
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
+const pagedRows  = computed(() => sortedPads.value)
+const pageStart  = computed(() => total.value === 0 ? 0 : (page.value - 1) * perPage.value + 1)
+const pageEnd    = computed(() => Math.min(page.value * perPage.value, total.value))
 
 function sort(key) {
   if (sortKey.value === key) sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
@@ -336,25 +414,38 @@ function sort(key) {
 }
 function sortIcon(k) { return sortKey.value === k ? (sortDir.value === 'asc' ? '↑' : '↓') : '' }
 
+function _activeFilters() {
+  return {
+    caseTypeId: filterCaseType.value  || null,
+    createdBy:  filterEnteredBy.value || null,
+    issuedBy:   filterIssuedBy.value  || null,
+    issuedTo:   filterIssuedTo.value  || null,
+  }
+}
+
 function search() {
-  appliedCaseType.value  = filterCaseType.value
-  appliedEnteredBy.value = filterEnteredBy.value
-  appliedIssuedBy.value  = filterIssuedBy.value
-  appliedIssuedTo.value  = filterIssuedTo.value
   page.value = 1
+  store.fetchPads({ page: 1, pageSize: perPage.value, ..._activeFilters() })
+}
+
+function changePage(n) {
+  page.value = n
+  store.fetchPads({ page: n, pageSize: perPage.value, ..._activeFilters() })
 }
 
 function clearFilters() {
-  filterCaseType.value = ''
-  filterEnteredBy.value = ''
-  filterIssuedBy.value = ''
-  filterIssuedTo.value = ''
-  appliedCaseType.value = ''
-  appliedEnteredBy.value = ''
-  appliedIssuedBy.value = ''
-  appliedIssuedTo.value = ''
+  filterCaseType.value  = ''; caseTypeSearch.value  = ''
+  filterEnteredBy.value = ''; enteredBySearch.value = ''
+  filterIssuedBy.value  = ''; issuedBySearch.value  = ''
+  filterIssuedTo.value  = ''; issuedToSearch.value  = ''
   page.value = 1
+  store.fetchPads({ page: 1, pageSize: perPage.value })
 }
+
+watch(perPage, (newSize) => {
+  page.value = 1
+  store.fetchPads({ page: 1, pageSize: newSize, ..._activeFilters() })
+})
 
 /* ───────────── Formatters ───────────── */
 function formatDate(d) {
@@ -499,33 +590,15 @@ function denormalise(payload) {
 
 async function saveTicketPad() {
   if (!validate()) return
+  const isAdd = modalMode.value === 'add'
 
   const startNum = Number(form.startNum)
   const endNum = Number(form.endNum)
   const total = endNum - startNum + 1
 
-  if (modalMode.value === 'add') {
-    const base = {
-      case_type_id: form.case_type_id,
-      issuedBy: form.issuedBy,
-      issuedTo: form.issuedTo,
-      issuedDate: form.issuedDate,
-      startNum,
-      endNum,
-      Totaltickets: total,
-      Issuedtickets: 0,
-      Firstused: null,
-      Lastused: null,
-      active: 1,
-      CreatedBy: form.entered_by,
-      CreatedDT: new Date().toISOString()
-    }
-    await store.createPad({ ...base, ...denormalise(base) })
-  } else if (modalMode.value === 'edit') {
-    const existing = pads.value.find(p => p.ticket_pad_id === form.ticket_pad_id)
-    if (existing) {
+  try {
+    if (isAdd) {
       const base = {
-        ...existing,
         case_type_id: form.case_type_id,
         issuedBy: form.issuedBy,
         issuedTo: form.issuedTo,
@@ -533,17 +606,42 @@ async function saveTicketPad() {
         startNum,
         endNum,
         Totaltickets: total,
-        active: form.disabledFlag ? 0 : 1
+        Issuedtickets: 0,
+        Firstused: null,
+        Lastused: null,
+        active: 1,
+        CreatedBy: form.entered_by,
+        CreatedDT: new Date().toISOString()
       }
-      await store.updatePad(form.ticket_pad_id, { ...base, ...denormalise(base) })
+      await store.createPad({ ...base, ...denormalise(base) })
+    } else {
+      const existing = pads.value.find(p => p.ticket_pad_id === form.ticket_pad_id)
+      if (existing) {
+        const base = {
+          ...existing,
+          case_type_id: form.case_type_id,
+          issuedBy: form.issuedBy,
+          issuedTo: form.issuedTo,
+          issuedDate: form.issuedDate,
+          startNum,
+          endNum,
+          Totaltickets: total,
+          active: form.disabledFlag ? 0 : 1
+        }
+        await store.updatePad(form.ticket_pad_id, { ...base, ...denormalise(base) })
+      }
     }
+    closeModal()
+    await swal.success(isAdd ? 'Ticket pad created successfully.' : 'Ticket pad updated successfully.')
+  } catch (err) {
+    formError.value = err?.data?.detail || err?.message || 'Save failed. Please try again.'
   }
-  closeModal()
 }
 </script>
 
 <style scoped>
 .req { color: var(--danger); margin-left: 2px; }
+.searchable-wrap { position: relative; }
 
 .toggle-row {
   display: flex; align-items: center; gap: 24px;
@@ -613,4 +711,29 @@ async function saveTicketPad() {
 @media (max-width: 720px) {
   .ticket-grid { grid-template-columns: 1fr; }
 }
+</style>
+
+<style>
+/* Teleported dropdowns render at <body> level — cannot be scoped */
+.searchable-dropdown-teleport {
+  position: fixed;
+  z-index: 9999;
+  background: #fff;
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+.searchable-option {
+  padding: 7px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  color: #111827;
+}
+.searchable-option:hover,
+.searchable-option.selected { background: #f3f4f6; }
+.searchable-option--clear   { color: #6b7280; font-style: italic; }
+.searchable-empty           { padding: 8px 12px; font-size: 13px; color: #9ca3af; }
 </style>

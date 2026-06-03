@@ -48,6 +48,10 @@ export const casesService = {
     api.delete(`/revp/cases/${encodeURIComponent(id)}/linked/${encodeURIComponent(linkedId)}/`),
   getLinkedDetail: (id) => api.get(`/revp/cases/${encodeURIComponent(id)}/linked-detail/`),
 
+  // ── Purge by reference (admin — irreversible hard-delete) ────────────────
+  removeByRef: (caseRefNo) =>
+    api.delete(`/revp/cases/by-ref/${encodeURIComponent(caseRefNo)}/remove/`),
+
   // ── Attachments (revp_attachment) ─────────────────────────────────────────
   listAttachments:  (id)       => api.get(`/revp/cases/${encodeURIComponent(id)}/attachments/`),
   uploadAttachment: (id, file) => {
