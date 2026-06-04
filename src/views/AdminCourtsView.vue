@@ -103,7 +103,7 @@
     </div>
 
     <!-- Add / Edit court modal -->
-    <div v-if="showModal" class="modal-backdrop" @click.self="closeModal">
+    <div v-if="showModal" class="modal-backdrop">
       <div class="modal-card modal-card-wide" role="dialog" aria-labelledby="courtModalTitle">
         <div class="modal-header">
           <h2 id="courtModalTitle" class="modal-title">
@@ -232,7 +232,7 @@
       </div>
     </div>
     <!-- Delete confirmation modal -->
-    <div v-if="deleteOpen" class="modal-backdrop" @click.self="deleteOpen = false">
+    <div v-if="deleteOpen" class="modal-backdrop">
       <div class="modal-card" role="dialog">
         <div class="modal-header">
           <h2 class="modal-title">Delete Court Details</h2>
@@ -257,9 +257,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { useAdminCourtsStore } from '@/store/admin-courts.store.js'
+import { swal } from '@/utils/swal.js'
 
 const store = useAdminCourtsStore()
 
@@ -444,6 +445,7 @@ async function saveCourt() {
     }
     showModal.value = false
     loadCourts()
+    await swal.success(modalMode.value === 'edit' ? 'Court updated successfully.' : 'Court created successfully.')
   } catch (err) {
     saveError.value = extractErrorMessage(err)
   } finally {
@@ -481,14 +483,6 @@ async function confirmDelete() {
   }
 }
 
-function onEscKey(e) {
-  if (e.key === 'Escape' && showModal.value && !saving.value) closeModal()
-}
-watch(showModal, (open) => {
-  if (open) document.addEventListener('keydown', onEscKey)
-  else document.removeEventListener('keydown', onEscKey)
-})
-onUnmounted(() => document.removeEventListener('keydown', onEscKey))
 </script>
 
 <style scoped>

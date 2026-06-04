@@ -3,25 +3,27 @@ import { ref } from 'vue'
 import { serviceTypesService } from '@/services/service-types.service.js'
 
 export const useServiceTypesStore = defineStore('serviceTypes', () => {
-  const rows = ref([])
-  const total = ref(0)
+  const rows    = ref([])
   const loading = ref(false)
-  const error = ref(null)
+  const error   = ref(null)
 
-  async function fetchAll(params = {}) {
+  // List endpoint returns a plain array (no pagination wrapper)
+  async function fetchAll() {
     loading.value = true
-    error.value = null
+    error.value   = null
     try {
-      const data = await serviceTypesService.getAll(params)
-      rows.value = data.results ?? []
-      total.value = data.total ?? 0
+      const data  = await serviceTypesService.getAll()
+      rows.value  = Array.isArray(data) ? data : []
     } catch (err) {
       error.value = 'Failed to load service types. Please try again.'
-      rows.value = []
-      total.value = 0
+      rows.value  = []
     } finally {
       loading.value = false
     }
+  }
+
+  async function fetchById(id) {
+    return serviceTypesService.getById(id)
   }
 
   async function createServiceType(payload) {
@@ -37,7 +39,7 @@ export const useServiceTypesStore = defineStore('serviceTypes', () => {
   }
 
   return {
-    rows, total, loading, error,
-    fetchAll, createServiceType, updateServiceType, removeServiceType,
+    rows, loading, error,
+    fetchAll, fetchById, createServiceType, updateServiceType, removeServiceType,
   }
 })

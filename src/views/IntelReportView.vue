@@ -52,7 +52,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import { apiGet, apiPut } from '@/services/api.js'
@@ -93,6 +93,10 @@ function openEdit() {
 }
 
 function closeModal() { modalOpen.value = false }
+
+watch(() => form.email_address, v => {
+  if (errors.email_address && v && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) delete errors.email_address
+})
 
 async function save() {
   Object.keys(errors).forEach(k => delete errors[k])

@@ -1,8 +1,9 @@
 import { api } from '@/services/api.js'
 
 export const serviceTypesService = {
-  getAll: (params = {}) => api.get(`/v1/revp/service-types/?${new URLSearchParams(params)}`),
-  create: (payload) => api.post('/v1/revp/service-types/', payload),
-  update: (id, payload) => api.put(`/v1/revp/service-types/${id}/`, payload),
-  remove: (id) => api.delete(`/v1/revp/service-types/${id}/`),
+  getAll:  () => api.get('/revp/stations/service-types/'),
+  getById: (id) => api.get(`/revp/stations/service-types/${id}/`),
+  create:  (payload) => api.post('/revp/stations/service-types/create/', payload),
+  update:  (id, payload) => api.put(`/revp/stations/service-types/${id}/`, payload),
+  remove:  (id) => api.delete(`/revp/stations/service-types/${id}/`),
 }

@@ -116,7 +116,7 @@
     </div>
 
     <!-- Add / Edit / View modal -->
-    <div v-if="modalOpen" class="modal-overlay" @click.self="closeModal" role="dialog" aria-modal="true" :aria-label="modalTitle">
+    <div v-if="modalOpen" class="modal-overlay" role="dialog" aria-modal="true" :aria-label="modalTitle">
       <div class="modal modal-lg">
         <div class="modal-header">
           <h2 class="modal-title">{{ modalTitle }}</h2>
@@ -176,8 +176,9 @@
                   <input v-model.trim="form.courtAddr.postcode" type="text" placeholder="Postcode" :disabled="modalMode==='view'" maxlength="10" />
                 </div>
                 <div class="form-group">
-                  <label class="form-label">House Name</label>
+                  <label class="form-label">House Name <span class="req">*</span></label>
                   <input v-model.trim="form.courtAddr.houseName" type="text" placeholder="House Name" :disabled="modalMode==='view'" maxlength="30" />
+                  <span v-if="errors['court_address.house']" class="form-error">{{ errors['court_address.house'] }}</span>
                 </div>
                 <div class="form-group">
                   <label class="form-label">House Number</label>
@@ -210,8 +211,9 @@
                   <input v-model.trim="form.adminAddr.postcode" type="text" placeholder="Postcode" :disabled="modalMode==='view'" maxlength="10" />
                 </div>
                 <div class="form-group">
-                  <label class="form-label">House Name</label>
+                  <label class="form-label">House Name <span class="req">*</span></label>
                   <input v-model.trim="form.adminAddr.houseName" type="text" placeholder="House Name" :disabled="modalMode==='view'" maxlength="30" />
+                  <span v-if="errors['admin_address.house']" class="form-error">{{ errors['admin_address.house'] }}</span>
                 </div>
                 <div class="form-group">
                   <label class="form-label">House Number</label>
@@ -278,9 +280,10 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch } from 'vue'
+import { ref, reactive, computed, watch, nextTick } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { useCourtsStore } from '@/store/courts.store.js'
+import { swal } from '@/utils/swal.js'
 
 const store = useCourtsStore()
 
@@ -365,7 +368,8 @@ loadCourts()
 const modalOpen = ref(false)
 const modalMode = ref('add')  // 'add' | 'edit' | 'view'
 const formError = ref('')
-const savePending = ref(false)
+const savePending   = ref(false)
+const hasValidated  = ref(false)
 
 const deleteOpen    = ref(false)
 const deleteTarget  = ref(null)
@@ -399,7 +403,14 @@ const form   = reactive(blankForm())
 const errors = reactive({})
 
 function resetForm() {
-  Object.assign(form, blankForm())
+  hasValidated.value = false
+  form.court_id           = ''
+  form.name               = ''
+  form.code               = ''
+  form.area               = ''
+  form.active             = true
+  form.hideFilterFlag     = false
+  form.addressForAdminFlag = false
   Object.assign(form.courtAddr, blankAddr())
   Object.assign(form.adminAddr, blankAddr())
   Object.keys(errors).forEach(k => delete errors[k])
@@ -432,17 +443,33 @@ function formAddrToPayload(fa) {
 }
 
 function loadIntoForm(row) {
-  Object.assign(form, blankForm(), {
-    court_id:           row.court_id,
-    name:               row.name ?? '',
-    code:               row.code ?? '',
-    area:               row.area ?? '',
-    active:             row.active === 1,
-    hideFilterFlag:     row.is_hide_filter_lists === 1,
-    addressForAdminFlag: row.address_for_admin === 1,
-  })
-  Object.assign(form.courtAddr, addrToForm(row.court_address))
-  Object.assign(form.adminAddr, addrToForm(row.admin_address))
+  // Update scalar fields in-place so reactive watchers on nested addr objects
+  // don't lose their dependency tracking when the sub-object reference changes.
+  form.court_id           = row.court_id
+  form.name               = row.name ?? ''
+  form.code               = row.code ?? ''
+  form.area               = row.area ?? ''
+  form.active             = row.active === 1
+  form.hideFilterFlag     = row.is_hide_filter_lists === 1
+  form.addressForAdminFlag = row.address_for_admin === 1
+
+  const ca = addrToForm(row.court_address)
+  form.courtAddr.postcode    = ca.postcode
+  form.courtAddr.houseName   = ca.houseName
+  form.courtAddr.houseNo     = ca.houseNo
+  form.courtAddr.street      = ca.street
+  form.courtAddr.locality    = ca.locality
+  form.courtAddr.town        = ca.town
+  form.courtAddr.countryName = ca.countryName
+
+  const aa = addrToForm(row.admin_address)
+  form.adminAddr.postcode    = aa.postcode
+  form.adminAddr.houseName   = aa.houseName
+  form.adminAddr.houseNo     = aa.houseNo
+  form.adminAddr.street      = aa.street
+  form.adminAddr.locality    = aa.locality
+  form.adminAddr.town        = aa.town
+  form.adminAddr.countryName = aa.countryName
 }
 
 /* ─────────────── Modal handlers ─────────────── */
@@ -458,7 +485,13 @@ async function openEdit(row) {
   modalOpen.value = true
   try {
     const data = await store.fetchCourtById(row.court_id)
+    // Suppress watchers during data population so they can't fire against a
+    // partially-blank form. nextTick lets Vue flush any pending watcher queue
+    // before re-enabling live validation.
+    hasValidated.value = false
     loadIntoForm(data)
+    await nextTick()
+    // hasValidated stays false — real-time sync only activates after first save attempt
   } catch (err) {
     formError.value = 'Could not load court details — please close and try again.'
   }
@@ -490,14 +523,63 @@ function onMirrorChange() {
 }
 
 /* ─────────────── Validation ─────────────── */
+function syncFormError() {
+  formError.value = Object.keys(errors).length > 0 ? 'Please correct the highlighted fields' : ''
+}
+
 function validate() {
+  hasValidated.value = true
   Object.keys(errors).forEach(k => delete errors[k])
   formError.value = ''
   let ok = true
-  if (!form.name?.trim()) { errors.name = 'Please enter a court name'; ok = false }
+
+  if (!form.name?.trim()) {
+    errors.name = 'Please enter a court name'
+    ok = false
+  }
+
+  if (!form.courtAddr.houseName) {
+    errors['court_address.house'] = 'House Name is required'
+    ok = false
+  }
+
+  if (!form.addressForAdminFlag && !form.adminAddr.houseName) {
+    errors['admin_address.house'] = 'House Name is required'
+    ok = false
+  }
+
   if (!ok) formError.value = 'Please correct the highlighted fields'
   return ok
 }
+
+/* Live sync — only fires after first submit attempt */
+watch(() => form.name, () => {
+  if (!hasValidated.value) return
+  if (!form.name?.trim()) errors.name = 'Please enter a court name'
+  else delete errors.name
+  syncFormError()
+})
+
+function _syncCourtHouse() {
+  if (!hasValidated.value) return
+  if (!form.courtAddr.houseName)
+    errors['court_address.house'] = 'House Name is required'
+  else
+    delete errors['court_address.house']
+  syncFormError()
+}
+watch(() => form.courtAddr.houseName, _syncCourtHouse)
+
+function _syncAdminHouse() {
+  if (!hasValidated.value) return
+  if (!form.addressForAdminFlag && !form.adminAddr.houseName)
+    errors['admin_address.house'] = 'House Name is required'
+  else
+    delete errors['admin_address.house']
+  syncFormError()
+}
+watch(() => form.adminAddr.houseName,   _syncAdminHouse)
+watch(() => form.addressForAdminFlag,   _syncAdminHouse)
 
 /* ─────────────── Save ─────────────── */
 async function saveCourt() {
@@ -520,7 +602,8 @@ async function saveCourt() {
   }
 
   try {
-    if (modalMode.value === 'edit') {
+    const isEdit = modalMode.value === 'edit'
+    if (isEdit) {
       await store.updateCourt(form.court_id, payload)
     } else {
       await store.createCourt(payload)
@@ -528,6 +611,7 @@ async function saveCourt() {
     modalOpen.value = false
     resetForm()
     loadCourts()
+    swal.success(isEdit ? 'Court updated successfully' : 'Court added successfully')
   } catch (err) {
     const data = err?.data
     if (data && typeof data === 'object') {

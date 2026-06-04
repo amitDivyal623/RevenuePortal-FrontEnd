@@ -46,17 +46,21 @@ export const ticketPadsService = {
     return { caseTypes, tocUsers, padIssuers, sessionUserId }
   },
 
-  getAll: async () => {
-    const allItems = []
-    let page = 1
-    while (true) {
-      const data = await api.get(`/revp/ticketpads/?page=${page}&page_size=100`)
-      const results = data?.results ?? []
-      allItems.push(...results.map(_fromApi))
-      if (allItems.length >= (data?.total ?? 0) || results.length === 0) break
-      page++
+  getPage: async ({ page = 1, pageSize = 25, caseTypeId = null, createdBy = null, issuedBy = null, issuedTo = null } = {}) => {
+    const qs = new URLSearchParams({ page: String(page), page_size: String(pageSize) })
+    const hasFilter = caseTypeId || createdBy || issuedBy || issuedTo
+    if (hasFilter) {
+      qs.append('search', '1')
+      if (caseTypeId) qs.append('case_type_id', caseTypeId)
+      if (createdBy)  qs.append('created_by',   createdBy)
+      if (issuedBy)   qs.append('issued_by',     issuedBy)
+      if (issuedTo)   qs.append('issued_to',     issuedTo)
     }
-    return allItems
+    const data = await api.get(`/revp/ticketpads/?${qs}`)
+    return {
+      total:   data?.total ?? 0,
+      results: (data?.results ?? []).map(_fromApi),
+    }
   },
 
   create: async (payload) => {

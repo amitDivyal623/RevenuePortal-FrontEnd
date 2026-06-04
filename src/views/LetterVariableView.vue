@@ -89,11 +89,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import ConfirmDelete from '@/components/ConfirmDelete.vue'
 import { useLetterVariablesStore } from '@/store/letter-variables.store.js'
+import { swal } from '@/utils/swal.js'
 
 const store = useLetterVariablesStore()
 onMounted(() => store.init())
@@ -130,11 +131,17 @@ function validate(){
   if(!form.value) { errors.value='Please enter value'; ok=false }
   return ok
 }
+
+watch(() => form.variableName,        v => { if (errors.variableName && v?.trim()) delete errors.variableName })
+watch(() => form.variable_data_types, v => { if (errors.variable_data_types && v) delete errors.variable_data_types })
+watch(() => form.value,               v => { if (errors.value && v?.trim()) delete errors.value })
 async function saveVar(){
   if(!validate()) return
   form.applicable_styles = form.style_values
-  if(modalMode.value==='add') await store.createVariable({ variableName:form.variableName, variable_data_types:form.variable_data_types, value:form.value, variableType:form.variableType, applicable_styles:form.style_values, style_values:form.style_values, bActive:form.bActive })
+  const isAdd = modalMode.value === 'add'
+  if(isAdd) await store.createVariable({ variableName:form.variableName, variable_data_types:form.variable_data_types, value:form.value, variableType:form.variableType, applicable_styles:form.style_values, style_values:form.style_values, bActive:form.bActive })
   else await store.updateVariable(form.variableID, { variableName:form.variableName, variable_data_types:form.variable_data_types, value:form.value, applicable_styles:form.style_values, style_values:form.style_values, bActive:form.bActive })
   closeModal()
+  await swal.success(isAdd ? 'Variable created successfully.' : 'Variable updated successfully.')
 }
 </script>

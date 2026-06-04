@@ -68,7 +68,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminModal from '@/components/AdminModal.vue'
 import { apiGet, apiPost } from '@/services/api.js'
@@ -120,6 +120,8 @@ function closeModal() {
   modalOpen.value    = false
   selectedFile.value = null
 }
+
+watch(() => form.name, v => { if (errors.name && v?.trim()) delete errors.name })
 
 function onFileChange(e) {
   selectedFile.value = e.target.files?.[0] ?? null
