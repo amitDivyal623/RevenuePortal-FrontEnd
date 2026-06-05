@@ -87,6 +87,37 @@ export async function apiDownload(path, filename) {
   URL.revokeObjectURL(url)
 }
 
+// POST a JSON body and download the response as a file. Used for endpoints
+// where the input list is large enough to exceed URL length (PRINT LABEL,
+// CREATE LETTER selection, etc.) — apiDownload's GET-only signature can't
+// carry the body.
+export async function apiDownloadPost(path, body, filename) {
+  const auth = await loadAuth()
+  const token = auth?.accessToken ?? null
+  const headers = { 'Content-Type': 'application/json' }
+  if (token) headers.Authorization = `Bearer ${token}`
+  const resp = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  })
+  if (!resp.ok) {
+    // Try to surface the validation error JSON if the server returned one.
+    let detail = null
+    try { detail = await resp.json() } catch {}
+    throw new ApiError({ status: resp.status, data: detail })
+  }
+  const blob = await resp.blob()
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename || 'download'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
 export const apiPostPublic = (path, body, opts = {}) =>
   request(path, { ...opts, method: 'POST', body: JSON.stringify(body) }, { skipAuth: true })
 

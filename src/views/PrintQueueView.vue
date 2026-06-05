@@ -22,7 +22,7 @@
           <label class="form-label">Agent</label>
           <select v-model="filters.agent">
             <option value="">Select All</option>
-            <option v-for="a in agents" :key="a" :value="a">{{ a }}</option>
+            <option v-for="a in agents" :key="a.user_id" :value="a.user_id">{{ a.name }}</option>
           </select>
         </div>
         <div class="form-group">
@@ -155,14 +155,18 @@
 </template>
 
 <script setup>
-import { ref, computed, reactive } from 'vue'
+import { ref, computed, reactive, onMounted, watch } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import { sanitizeString } from '@/utils/security.js'
+import { printQueueService } from '@/services/print-queue.service.js'
 
-const agents = ['Asif Ansari', 'J. Smith', 'R. Patel', 'M. Khan', 'L. Chen']
-const docTypes = ['Case Letter', 'Court Notice', 'Final Demand', 'Appeal Response', 'Warning Letter']
-const allStatuses = ['IN_PRINT_QUEUE', 'PRINTED', 'FAILED', 'CANCELLED']
+// ── Reference data (loaded from /revp/printqueue/lookups/) ──────────────
+const agents = ref([])         // [{ user_id, name }]
+const docTypes = ref([])       // ['Case Letter', ...]
+const allStatuses = ref([])    // [{ letter_status_id, name }]
 
+// ── Filter state ────────────────────────────────────────────────────────
+// Map between status NAME (what the chip UI shows) and status ID (what the
+// backend wants). The backend filter accepts a csv of IDs.
 const filters = reactive({
   dateFrom: '',
   dateTo: '',
@@ -171,10 +175,14 @@ const filters = reactive({
   printedFrom: '',
   printedTo: '',
   docType: '',
-  letterStatus: ['IN_PRINT_QUEUE']
+  letterStatus: ['IN_PRINT_QUEUE'],  // chip array — by NAME
 })
 
-const availableStatuses = computed(() => allStatuses.filter(s => !filters.letterStatus.includes(s)))
+const availableStatuses = computed(() =>
+  allStatuses.value
+    .map(s => s.name)
+    .filter(n => !filters.letterStatus.includes(n))
+)
 
 function addStatus(val) {
   if (val && !filters.letterStatus.includes(val)) filters.letterStatus.push(val)
@@ -183,70 +191,142 @@ function removeStatus(idx) {
   filters.letterStatus.splice(idx, 1)
 }
 
+const statusIdsForFilter = computed(() =>
+  filters.letterStatus
+    .map(name => allStatuses.value.find(s => s.name === name)?.letter_status_id)
+    .filter(Boolean)
+)
+
+// ── Pagination / sort / loading state ───────────────────────────────────
 const perPage = ref(10)
 const currentPage = ref(1)
-const selectedRows = ref([])
-const sortKey = ref('createdDate')
-const sortDir = ref('asc')
+const selectedRows = ref([])  // array of print_id strings
+const sortKey = ref('created_dt')
+const sortDir = ref('desc')
 const lastUpdated = ref(currentTime())
+const loading = ref(false)
+const apiError = ref('')
+
+// Rows + total fetched from backend.
+const rows = ref([])      // server-paginated page
+const total = ref(0)
 
 function currentTime() {
   const now = new Date()
   return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
 }
-function refresh() {
-  lastUpdated.value = currentTime()
-  selectedRows.value = []
+
+// Map UI column key → backend ordering token (validators allowlist).
+const SORT_TO_ORDERING = {
+  createdDate:   'created_dt',
+  customerName: null,  // not a sortable server field — fall back to default
+  letterTitle:  'comm__letter_template__title',
+  caseRef:      'comm__case__case_num',
+  caseType:     'comm__case__case_type__code',
+  caseStatus:   'comm__case__case_status__status_desc',
+  letterStatus: 'comm__letter_status__name',
+  documentType: 'document_type',
 }
 
-const customers = ['MS Rukhmani Chouhan','Master SJJS USHS','MISS NSJS SHSH','Master HSHS SYSHS','MS Sarah Wilson','Mr John Smith','Miss T. Master','Mr Teddy GR']
-const letterTitles = ['Revp Case Create Letter','Revp case create letter (no email)','PFN Print Template','Court Notice Template','Final Demand Letter']
-const caseTypes = ['UFN','PF','PFN','MG11','PCN','FT','MICS']
-const caseStatuses = ['Open','Court Booked','Closed','Under Appeal','Court Queue']
+function backendOrdering() {
+  const base = SORT_TO_ORDERING[sortKey.value] || 'created_dt'
+  return sortDir.value === 'desc' ? `-${base}` : base
+}
 
-const allRows = ref(Array.from({ length: 2187 }, (_, i) => {
-  const dd = String((i % 28) + 1).padStart(2, '0')
-  const mm = String(((i % 12) + 1)).padStart(2, '0')
-  const hh = String((i % 24)).padStart(2, '0')
-  const mn = String((i * 3) % 60).padStart(2, '0')
-  const cType = caseTypes[i % caseTypes.length]
-  return {
-    id: i + 1,
-    createdDate: `${dd}/${mm}/2023 ${hh}:${mn}`,
-    customerName: customers[i % customers.length],
-    letterTitle: letterTitles[i % letterTitles.length],
-    caseRef: `EMR/${cType}/${String(584 + i).padStart(6, '0')}`,
-    caseType: cType,
-    caseStatus: caseStatuses[i % caseStatuses.length],
-    letterStatus: 'IN_PRINT_QUEUE',
-    documentType: 'Case Letter'
+// ── Data loading ────────────────────────────────────────────────────────
+async function fetchPage() {
+  loading.value = true
+  apiError.value = ''
+  try {
+    const data = await printQueueService.list({
+      page:           currentPage.value,
+      pageSize:       perPage.value,
+      ordering:       backendOrdering(),
+      dateFrom:       filters.dateFrom || undefined,
+      dateTo:         filters.dateTo   || undefined,
+      printedFrom:    filters.printedFrom || undefined,
+      printedTo:      filters.printedTo   || undefined,
+      caseNum:        filters.caseRef.trim() || undefined,
+      documentType:   filters.docType || undefined,
+      agent:          filters.agent   || undefined,
+      letterStatusIds: statusIdsForFilter.value,
+    })
+    rows.value  = data?.results ?? []
+    total.value = data?.total   ?? 0
+    lastUpdated.value = currentTime()
+  } catch (e) {
+    console.error('[print-queue] fetch failed', e)
+    apiError.value = e?.message || 'Failed to load print queue.'
+    rows.value = []
+    total.value = 0
+  } finally {
+    loading.value = false
   }
-}))
+}
+
+async function loadLookups() {
+  try {
+    const data = await printQueueService.lookups()
+    allStatuses.value = data?.letter_statuses ?? []
+    docTypes.value    = data?.document_types  ?? []
+    agents.value      = data?.agents          ?? []
+  } catch (e) {
+    console.warn('[print-queue] lookups failed', e)
+  }
+}
+
+function refresh() {
+  selectedRows.value = []
+  fetchPage()
+}
 
 function applyFilters() {
   currentPage.value = 1
   selectedRows.value = []
+  fetchPage()
 }
 
-const filteredRows = computed(() => {
-  return allRows.value.filter(r => {
-    if (filters.caseRef) {
-      const q = sanitizeString(filters.caseRef).toLowerCase()
-      if (q && !r.caseRef.toLowerCase().includes(q)) return false
-    }
-    if (filters.letterStatus.length && !filters.letterStatus.includes(r.letterStatus)) return false
-    if (filters.docType && r.documentType !== filters.docType) return false
-    return true
-  }).sort((a, b) => {
-    const mul = sortDir.value === 'asc' ? 1 : -1
-    return a[sortKey.value] > b[sortKey.value] ? mul : -mul
-  })
-})
+// ── Derived view-model — keep template field names stable ───────────────
+const pagedRows = computed(() => rows.value.map(r => ({
+  id:           r.print_id,
+  print_id:     r.print_id,
+  case_id:      r.case_id,
+  createdDate:  fmtDateTime(r.created_dt),
+  customerName: r.customer_name || '—',
+  letterTitle:  r.letter_title  || '—',
+  caseRef:      r.case_num      || '—',
+  caseType:     r.case_type_code || '—',
+  caseStatus:   r.case_status_desc || '—',
+  letterStatus: r.letter_status_name || '—',
+  documentType: r.document_type || '—',
+})))
 
-const totalPages = computed(() => Math.max(1, Math.ceil(filteredRows.value.length / perPage.value)))
-const rangeStart = computed(() => filteredRows.value.length === 0 ? 0 : (currentPage.value - 1) * perPage.value + 1)
-const rangeEnd = computed(() => Math.min(currentPage.value * perPage.value, filteredRows.value.length))
-const pagedRows = computed(() => filteredRows.value.slice(rangeStart.value - 1, rangeEnd.value))
+const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
+const rangeStart = computed(() => total.value === 0 ? 0 : (currentPage.value - 1) * perPage.value + 1)
+const rangeEnd   = computed(() => Math.min(currentPage.value * perPage.value, total.value))
+
+// Expose `filteredRows` for the template's existing pagination footer.
+const filteredRows = computed(() => ({ length: total.value }))
+
+function fmtDateTime(iso) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const yy = d.getFullYear()
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mi = String(d.getMinutes()).padStart(2, '0')
+  return `${dd}/${mm}/${yy} ${hh}:${mi}`
+}
+
+// Refetch when sort / pagination / page-size changes.
+watch([currentPage, perPage, sortKey, sortDir], () => fetchPage())
+
+onMounted(async () => {
+  await loadLookups()
+  fetchPage()
+})
 
 const pageNumbers = computed(() => {
   const total = totalPages.value
@@ -288,9 +368,21 @@ function caseStatusColor(s) {
   return map[s] ?? 'neutral'
 }
 
-function printSelected() { /* hook to API */ }
-function viewSelected() { /* hook to API */ }
-function openCase() { /* hook to router */ }
+function printSelected() {
+  // Phase 4B — docxtpl + LibreOffice render pipeline. Stubbed for now.
+  window.alert('PRINT SELECTED is queued for Phase 4B (PDF rendering pipeline).')
+}
+function viewSelected() {
+  window.alert('VIEW SELECTED is queued for Phase 4B (PDF rendering pipeline).')
+}
+function openCase() {
+  // Selection holds print_ids. Map back to case_id via the loaded rows.
+  const selectedId = selectedRows.value[0]
+  const row = rows.value.find(r => r.print_id === selectedId)
+  if (row?.case_id) {
+    window.open(`/cases/${row.case_id}`, '_blank', 'noopener')
+  }
+}
 </script>
 
 <style scoped>
