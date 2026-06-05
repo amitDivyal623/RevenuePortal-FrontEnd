@@ -16,10 +16,11 @@
       <div class="form-row">
         <div class="form-group">
           <label class="form-label">Court</label>
-          <select v-model="filterCourt">
-            <option value="">Please select Court</option>
-            <option v-for="c in courts" :key="c.court_id" :value="c.court_id">{{ c.name }}</option>
-          </select>
+          <SearchableSelect
+            v-model="filterCourt"
+            :options="courtOptions"
+            placeholder="Please select Court"
+          />
         </div>
         <div class="form-group">
           <label class="form-label">Date From</label>
@@ -30,7 +31,8 @@
           <input v-model="dateTo" type="date" />
         </div>
       </div>
-      <div class="flex" style="justify-content: flex-end">
+      <div class="filter-actions">
+        <button class="btn-clear" @click="clearFilter">CLEAR FILTERS</button>
         <button class="btn-search" @click="applyFilter">SEARCH</button>
       </div>
     </div>
@@ -101,6 +103,43 @@
       </div>
     </div>
 
+    <!-- Prosecutor Diary modal -->
+    <div v-if="showDiaryModal" class="modal-backdrop" @click.self="closeDiaryModal">
+      <div class="modal-card" role="dialog" aria-labelledby="diaryModalTitle">
+        <div class="modal-header">
+          <h2 id="diaryModalTitle" class="modal-title">Print Prosecutor Diary</h2>
+          <button class="modal-close" @click="closeDiaryModal" aria-label="Close">×</button>
+        </div>
+
+        <div class="modal-body">
+          <div class="modal-form-row">
+            <label class="modal-label">Date From</label>
+            <input v-model="diaryForm.dateFrom" type="date" />
+          </div>
+          <div class="modal-form-row">
+            <label class="modal-label">Date To</label>
+            <input v-model="diaryForm.dateTo" type="date" />
+          </div>
+          <div class="modal-form-row">
+            <label class="modal-label">Prosecutor</label>
+            <SearchableSelect
+              v-model="diaryForm.prosecutorId"
+              :options="prosecutorOptions"
+              placeholder="All Prosecutors"
+            />
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <p v-if="diaryError" class="save-error">{{ diaryError }}</p>
+          <button class="btn-cancel" @click="closeDiaryModal">CANCEL</button>
+          <button class="btn-save" :disabled="diaryLoading" @click="downloadDiary">
+            {{ diaryLoading ? 'GENERATING…' : 'PRINT' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Add / Edit booking modal -->
     <div v-if="showModal" class="modal-backdrop" @click.self="closeModal">
       <div class="modal-card" role="dialog" aria-labelledby="bookingModalTitle">
@@ -114,10 +153,11 @@
         <div class="modal-body">
           <div class="modal-form-row">
             <label class="modal-label">Court</label>
-            <select v-model="modalForm.court">
-              <option value="">Select Court</option>
-              <option v-for="c in courts" :key="c.court_id" :value="c.court_id">{{ c.name }}</option>
-            </select>
+            <SearchableSelect
+              v-model="modalForm.court"
+              :options="courtOptions"
+              placeholder="Select Court"
+            />
           </div>
 
           <div class="modal-form-row">
@@ -157,13 +197,17 @@
 <script setup>
 import { ref, reactive, computed, watch, onMounted, onUnmounted } from 'vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import SearchableSelect from '@/components/SearchableSelect.vue'
+import { courtBookingService } from '@/services/court-booking.service.js'
 import { useCourtBookingStore } from '@/store/court-booking.store.js'
 
 const store = useCourtBookingStore()
 
 const prosecutors = computed(() => store.prosecutors)
 
-const courts       = computed(() => store.courts)
+const courts          = computed(() => store.courts)
+const courtOptions    = computed(() => courts.value.map(c => ({ value: c.court_id, label: c.name })))
+const prosecutorOptions = computed(() => prosecutors.value.map(p => ({ value: p.prosecutor_id, label: p.name })))
 const bookings     = computed(() => store.bookings)
 const totalRecords = computed(() => store.totalRecords)
 const loading      = computed(() => store.loading)
@@ -217,6 +261,13 @@ function applyFilter() {
   currentPage.value = 1
   loadBookings()
 }
+function clearFilter() {
+  filterCourt.value = ''
+  dateFrom.value    = ''
+  dateTo.value      = ''
+  currentPage.value = 1
+  loadBookings()
+}
 function sort(key) {
   if (sortKey.value === key) sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
   else { sortKey.value = key; sortDir.value = 'asc' }
@@ -225,17 +276,54 @@ function sortIcon(key) { return sortKey.value === key ? (sortDir.value === 'asc'
 
 function formatStartDT(iso) {
   if (!iso) return ''
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return iso
-  const dd   = String(d.getDate()).padStart(2, '0')
-  const mm   = String(d.getMonth() + 1).padStart(2, '0')
-  const yyyy = d.getFullYear()
-  const hh   = String(d.getHours()).padStart(2, '0')
-  const mn   = String(d.getMinutes()).padStart(2, '0')
-  return `${dd}/${mm}/${yyyy} ${hh}:${mn}`
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/)
+  if (!m) return iso
+  return `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}`
 }
 
-function printDiary() { /* hook to API */ }
+// ---- Prosecutor Diary modal ----
+const showDiaryModal = ref(false)
+const diaryLoading   = ref(false)
+const diaryError     = ref('')
+const diaryForm      = reactive({ dateFrom: '', dateTo: '', prosecutorId: '' })
+
+function printDiary() {
+  diaryForm.dateFrom    = ''
+  diaryForm.dateTo      = ''
+  diaryForm.prosecutorId = ''
+  diaryError.value      = ''
+  showDiaryModal.value  = true
+}
+function closeDiaryModal() {
+  showDiaryModal.value = false
+  diaryError.value     = ''
+}
+async function downloadDiary() {
+  diaryError.value = ''
+  if (!diaryForm.dateFrom) { diaryError.value = 'Date From is required.'; return }
+  if (!diaryForm.dateTo)   { diaryError.value = 'Date To is required.'; return }
+  diaryLoading.value = true
+  try {
+    await courtBookingService.downloadProsecutorDiary({
+      date_from:     diaryForm.dateFrom,
+      date_to:       diaryForm.dateTo,
+      prosecutor_id: diaryForm.prosecutorId || undefined,
+    })
+    closeDiaryModal()
+  } catch (err) {
+    const data = err?.data
+    if (data && typeof data === 'object') {
+      diaryError.value = Object.entries(data).map(([k, v]) => {
+        const text = Array.isArray(v) ? v.join(', ') : String(v)
+        return k === 'detail' ? text : `${k}: ${text}`
+      }).join(' | ')
+    } else {
+      diaryError.value = err?.message || 'Failed to generate PDF.'
+    }
+  } finally {
+    diaryLoading.value = false
+  }
+}
 
 const showModal = ref(false)
 const modalMode = ref('add')
@@ -262,13 +350,9 @@ function openAddModal() {
 
 function openEditModal(row) {
   modalMode.value = 'edit'
-  const d = new Date(row.start_dt)
-  const isoDate = isNaN(d.getTime())
-    ? ''
-    : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  const isoTime = isNaN(d.getTime())
-    ? ''
-    : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const m = (row.start_dt || '').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/)
+  const isoDate = m ? `${m[1]}-${m[2]}-${m[3]}` : ''
+  const isoTime = m ? `${m[4]}:${m[5]}` : ''
   Object.assign(modalForm, {
     bookingId: row.court_booking_id,
     court: row.court_id,
@@ -296,6 +380,7 @@ async function saveBooking() {
   try {
     if (modalMode.value === 'edit') {
       await store.updateBooking(modalForm.bookingId, {
+        court_id:   modalForm.court,
         start_dt:   startDt,
         capacity:   modalForm.capacity,
         prosecutor: modalForm.prosecutor || null,
@@ -347,6 +432,25 @@ onUnmounted(() => document.removeEventListener('keydown', onEscKey))
   transition: background var(--transition);
 }
 .btn-add:hover { background: #128968; }
+
+.filter-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.btn-clear {
+  padding: 8px 22px;
+  background: #64748b;
+  color: #fff;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  transition: background var(--transition);
+}
+.btn-clear:hover { background: #475569; }
 
 .btn-search {
   padding: 8px 22px;

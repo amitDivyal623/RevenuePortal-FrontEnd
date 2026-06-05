@@ -1076,7 +1076,8 @@ import { casesService }     from '@/services/cases.service.js'
 import { customersService } from '@/services/customers.service.js'
 import { journeyService }   from '@/services/journey.service.js'
 import { vehiclesService }  from '@/services/vehicles.service.js'
-import { actionsService }   from '@/services/actions.service.js'
+import { actionsService }        from '@/services/actions.service.js'
+import { actionTemplateService } from '@/services/action-template.service.js'
 import { courtsService }    from '@/services/courts.service.js'
 import { paymentsService }  from '@/services/payments.service.js'
 
@@ -1346,6 +1347,16 @@ function fmtTime(iso) {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+// Add `days` to an ISO date string; returns the resulting ISO string for
+// further formatting, or '' when the input is falsy or unparseable.
+function _offsetDate(isoDate, days) {
+  if (!isoDate || days == null) return ''
+  const d = new Date(isoDate)
+  if (Number.isNaN(d.getTime())) return ''
+  d.setDate(d.getDate() + Number(days))
+  return d.toISOString()
+}
+
 // Years between an ISO date and today; '' when input is falsy / invalid
 // OR when the date is today/in the future (a 0-year-old isn't a real value
 // to display — return '' so the field renders blank instead of misleading).
@@ -1436,7 +1447,7 @@ async function loadCase() {
       casesService.getVerification(c.case_id),
       casesService.listAudit(c.case_id),
       casesService.listOffences(c.case_id),
-      actionsService.listByCase(c.case_id),
+      c.case_type_id ? actionTemplateService.getAll(c.case_type_id) : Promise.resolve([]),
       c.court_id          ? courtsService.get(c.court_id)             : Promise.resolve(null),
       c.court_booking_id  ? courtsService.getBooking(c.court_booking_id)   : Promise.resolve(null),
       paymentsService.listByCase(c.case_id),
@@ -1497,13 +1508,13 @@ async function loadCase() {
     }
     if (actsResult.status === 'fulfilled' && actsResult.value) {
       const rows = actsResult.value.results ?? actsResult.value ?? []
-      actions.value = rows.map((a, i) => ({
-        id:         a.action_id || i,
-        holder:     a.holder || '',
-        action:     a.title || a.action_name || a.description || '',
-        targetDate: fmtDate(a.action_due_dt),
-        actioned:   fmtDate(a.actioned_dt),
-        status:     a.action_status_desc || a.action_status_id || '',
+      actions.value = rows.map((t, i) => ({
+        id:         t.action_template_id || i,
+        holder:     t.holder || '',
+        action:     t.name || '',
+        targetDate: t.work_from_date ? fmtDate(_offsetDate(c.case_dt, t.days_offset)) : '',
+        actioned:   '',
+        status:     '',
       }))
     }
     if (courtResult.status === 'fulfilled' && courtResult.value) {

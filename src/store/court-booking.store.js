@@ -12,7 +12,7 @@ export const useCourtBookingStore = defineStore('courtBooking', () => {
 
   async function fetchCourts() {
     try {
-      const data = await courtBookingService.getCourts({ page_size: 200, active: 1 })
+      const data = await courtBookingService.getCourts({ page_size: 100 })
       courts.value = Array.isArray(data.results) ? data.results : []
     } catch {
       courts.value = []

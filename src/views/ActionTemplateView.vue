@@ -96,7 +96,7 @@
               <td><span class="badge badge-primary">{{ caseTypeName(row.case_type_id) }}</span></td>
               <td class="text-muted">{{ row.instruction }}</td>
               <td>
-                <span v-if="row.work_from_date === 1" class="badge badge-warning">*Offence Date*</span>
+                <span v-if="row.work_from_date === 1" class="badge badge-warning">Offence Date</span>
                 <span v-else class="badge badge-primary">{{ predecessorName(row.predecessor) }}</span>
               </td>
               <td style="text-align:right"><strong>{{ row.days_offset }}</strong></td>
@@ -471,9 +471,9 @@ async function fetchTemplatesForCaseType(caseTypeId) {
 }
 
 function predecessorName(id) {
-  if (!id) return '*Offence Date*'
-  const found = predecessorOptions.value.find(t => t.action_template_id === id)
-  return found ? found.name : '*Offence Date*'
+  if (!id) return 'Offence Date'
+  const found = actions.value.find(t => t.action_template_id === id)
+  return found ? found.name : id
 }
 
 /* ───────────── Action Type-driven visibility (matches legacy JS) ───────────── */
