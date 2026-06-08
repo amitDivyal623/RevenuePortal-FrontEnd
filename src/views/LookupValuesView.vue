@@ -87,7 +87,7 @@
             </tr>
             <tr v-for="row in rows" :key="row.lookup_data_id">
               <td><span class="badge badge-primary">{{ row.lookup_type_name }}</span></td>
-              <td><strong>{{ row.value }}</strong></td>
+              <td><strong>{{ row.lookup_data_value }}</strong></td>
               <td>
                 <span :class="`badge badge-${row.active ? 'success' : 'neutral'}`">
                   {{ row.active ? 'Enabled' : 'Disabled' }}
@@ -297,7 +297,7 @@ function openEdit(row) {
   Object.assign(form, {
     lookup_data_id: row.lookup_data_id,
     lookup_type_id: row.lookup_type_id,
-    value:          row.value,
+    value:          row.lookup_data_value,
     active:         row.active,
   })
   modalMode.value = 'edit'
@@ -309,7 +309,7 @@ function openView(row) {
   Object.assign(form, {
     lookup_data_id: row.lookup_data_id,
     lookup_type_id: row.lookup_type_id,
-    value:          row.value,
+    value:          row.lookup_data_value,
     active:         row.active,
   })
   modalMode.value = 'view'

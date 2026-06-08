@@ -85,18 +85,10 @@
           </div>
         </div>
 
-        <!-- Header action bar: EDIT when viewing, SAVE / CANCEL when in
-             edit mode. Read-only fields are intentional — Customer Name,
-             Case Number, Case Issuer, Case Type are identity fields set
-             at creation and aren't editable from here. -->
+        <!-- Header action bar: EDIT button only — Save/Cancel live at the
+             bottom-right of the page (below the tabs) to match legacy layout. -->
         <div class="mt-md case-mode-hint" style="display:flex;gap:8px;">
           <button v-if="!isEditMode" class="btn-edit" @click="enterEditMode">EDIT</button>
-          <template v-else>
-            <button class="btn-edit" :disabled="savingEdit" @click="saveEdit">
-              {{ savingEdit ? 'SAVING…' : 'SAVE' }}
-            </button>
-            <button class="btn-action-light" :disabled="savingEdit" @click="cancelEdit">CANCEL</button>
-          </template>
         </div>
       </div>
     </div>
@@ -115,11 +107,25 @@
         <div class="actions-section">
           <p class="actions-label">Actions</p>
           <div class="action-btns">
-            <button class="btn-action-light" @click="closeAction">CLOSE &amp; ACTION</button>
-            <button class="btn-action-light" @click="editAction">EDIT ACTION</button>
-            <button class="btn-action-light" @click="addNewAction">ADD NEW ACTION</button>
-            <button class="btn-action-green" @click="exportExcel('actions')">EXPORT EXCEL</button>
+            <!-- Disabled until at least one row is checked; busy while the API call runs.
+                 Also locked when the case is CLOSED. -->
+            <button class="btn-action-light"
+                    :disabled="selectedActionCount === 0 || actionBusy || isCaseClosed"
+                    @click="closeAction">CLOSE &amp; ACTION</button>
+            <!-- Edit requires exactly one row selected; locked on closed cases. -->
+            <button class="btn-action-light"
+                    :disabled="selectedActionCount !== 1 || isCaseClosed"
+                    @click="editAction">EDIT ACTION</button>
+            <button class="btn-action-light"
+                    :disabled="isCaseClosed"
+                    @click="addNewAction">ADD NEW ACTION</button>
+            <button class="btn-action-green"
+                    :disabled="actions.length === 0"
+                    @click="exportExcel('actions')">EXPORT EXCEL</button>
           </div>
+        </div>
+        <div v-if="actionError" class="tab-hint tab-hint-error" role="alert" style="margin-top:8px;">
+          {{ actionError }}
         </div>
         <div class="toolbar">
           <div class="flex items-center gap-sm">
@@ -135,7 +141,14 @@
           <table>
             <thead>
               <tr>
-                <th class="col-icon"><input type="checkbox" aria-label="Select all actions" /></th>
+                <th class="col-icon">
+                  <input type="checkbox"
+                         :checked="allActionsSelected"
+                         :indeterminate="selectedActionCount > 0 && !allActionsSelected"
+                         :disabled="isCaseClosed"
+                         @change="toggleAllActions"
+                         aria-label="Select all actions" />
+                </th>
                 <th>Holder</th>
                 <th>Action</th>
                 <th>Target Date</th>
@@ -144,13 +157,28 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in actions" :key="row.id" :class="{ 'row-faded': row.status === 'PENDING' }">
-                <td class="col-icon"><input type="checkbox" :aria-label="`Select action ${row.id}`" /></td>
+              <tr v-for="row in actions" :key="row.id"
+                  :class="{
+                    'row-faded':    (row.status || '').toUpperCase() === 'PENDING',
+                    'row-selected': selectedActionIds.has(row.id),
+                  }">
+                <td class="col-icon">
+                  <input type="checkbox"
+                         :checked="selectedActionIds.has(row.id)"
+                         :disabled="isCaseClosed"
+                         @change="toggleAction(row.id)"
+                         :aria-label="`Select action ${row.id}`" />
+                </td>
                 <td>{{ row.holder }}</td>
                 <td>{{ row.action }}</td>
                 <td>{{ row.targetDate }}</td>
                 <td>{{ row.actioned }}</td>
                 <td>{{ row.status }}</td>
+              </tr>
+              <tr v-if="actions.length === 0">
+                <td colspan="6">
+                  <div class="empty-state"><p class="empty-state-desc">No actions on this case.</p></div>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -180,13 +208,22 @@
             <legend>Customer</legend>
             <div class="form-row-left">
               <label class="form-label-left">Title</label>
-              <select v-if="isEditMode" v-model="customerForm.title" class="field-editable">
+              <select v-if="isEditMode" v-model="customerForm.title"
+                      @change="onTitleChange(customerForm.title)"
+                      class="field-editable">
                 <option value="">Please Select</option>
-                <option v-for="t in TITLE_OPTIONS" :key="t" :value="t">{{ t }}</option>
+                <option v-for="t in titleOptions" :key="t.lookup_data_id" :value="t.lookup_data_value">{{ t.lookup_data_value }}</option>
               </select>
-              <select v-else :value="customer.title" disabled class="field-readonly">
-                <option>{{ customer.title }}</option>
-              </select>
+              <input v-else :value="customer.title" readonly class="field-readonly" />
+
+              <template v-if="isEditMode && customerForm.title === 'Other'">
+                <label class="form-label-left">Other Title</label>
+                <input v-model="customerForm.other_title" maxlength="20" placeholder="Specify title" class="field-editable" />
+              </template>
+              <template v-else-if="!isEditMode && customer.title === 'Other' && customer.otherTitle">
+                <label class="form-label-left">Other Title</label>
+                <input :value="customer.otherTitle" readonly class="field-readonly" />
+              </template>
 
               <label class="form-label-left">First Name</label>
               <input v-if="isEditMode" v-model="customerForm.first_name" maxlength="100" class="field-editable" />
@@ -227,14 +264,22 @@
               </div>
 
               <label class="form-label-left">Telephone</label>
-              <input v-if="isEditMode" v-model="customerForm.contact_number" maxlength="30" class="field-editable" />
-              <input v-else :value="customer.telephone" readonly class="field-readonly" />
+              <div>
+                <input v-if="isEditMode"
+                       v-model="customerForm.contact_number"
+                       maxlength="30"
+                       class="field-editable"
+                       style="width:100%;"
+                       @input="contactNumberError = _validateContactNumber(customerForm.contact_number)" />
+                <input v-else :value="customer.telephone" readonly class="field-readonly" />
+                <span v-if="isEditMode && contactNumberError" class="form-error" style="font-size:11px;color:#b91c1c;display:block;margin-top:2px;">
+                  {{ contactNumberError }}
+                </span>
+              </div>
 
               <label class="form-label-left">Mobile Telephone</label>
-              <!-- Legacy schema only has one contact_number column; this stays
-                   read-only and mirrors Telephone — a separate column for mobile
-                   would need a backend migration. -->
-              <input :value="customer.mobileTelephone" readonly placeholder="Mobile Number" class="field-readonly" />
+              <input v-if="isEditMode" v-model="customerForm.mobile" maxlength="45" placeholder="Mobile Number" class="field-editable" />
+              <input v-else :value="customer.mobileTelephone" readonly placeholder="Mobile Number" class="field-readonly" />
 
               <label class="form-label-left">E-mail Address</label>
               <input v-if="isEditMode" v-model="customerForm.email" type="email" maxlength="100" class="field-editable" />
@@ -242,15 +287,26 @@
 
               <label class="form-label-left">Employment Status</label>
               <input v-if="isEditMode" v-model="customerForm.occupation" maxlength="45" placeholder="e.g. Student, Engineer" class="field-editable" />
-              <select v-else :value="customer.employmentStatus" disabled class="field-readonly">
-                <option>{{ customer.employmentStatus }}</option>
-              </select>
+              <input v-else :value="customer.employmentStatus" readonly class="field-readonly" />
 
               <label class="form-label-left">Parent/Guardian</label>
               <input v-if="isEditMode" v-model="customerForm.parent_guardian" maxlength="200" class="field-editable" />
               <input v-else :value="customer.parentGuardian" readonly class="field-readonly" />
             </div>
-            <button v-if="!isEditMode" class="btn-action-light mt-md" @click="showDescription">SHOW DESCRIPTION</button>
+
+            <!-- Shown only when the case was submitted via 'Unknown (Customer Input)'.
+                 Mirrors legacy EditAddress fuseaction customerInputReconciled flag. -->
+            <div v-if="caseDetails.caseIssuer === 'Unknown (Customer Input)'"
+                 class="form-row-left mt-md">
+              <label class="form-label-left" style="width:auto;margin-right:8px;">Customer Input Reconciled</label>
+              <input v-if="isEditMode" type="checkbox" v-model="customerForm.customer_input_reconciled" />
+              <input v-else type="checkbox" :checked="customer.customerInputReconciled" disabled />
+            </div>
+
+            <!-- ADD DESCRIPTION — visible in both view and edit mode.
+                 In view mode the modal opens read-only (fieldset disabled).
+                 In edit mode the operator can fill in / update and Save. -->
+            <button v-if="customerLinked" class="btn-action-light mt-md" @click="openDescriptionModal">SHOW DESCRIPTION</button>
           </fieldset>
 
           <div class="right-stack">
@@ -258,10 +314,26 @@
               <legend>Address</legend>
               <div class="form-row-left">
                 <label class="form-label-left">Postcode</label>
-                <div class="input-with-icon">
-                  <input v-if="isEditMode" v-model="customerForm.post_code" maxlength="10" class="field-editable" />
-                  <input v-else :value="customer.postcode" readonly class="field-readonly" />
-                  <span class="help-icon" title="Postcode lookup">?</span>
+                <div class="field-cell" style="position:relative">
+                  <div class="input-with-icon">
+                    <input v-if="isEditMode" v-model="customerForm.post_code" maxlength="10" class="field-editable"
+                           @keyup.enter.prevent="performAddressSearch" />
+                    <input v-else :value="customer.postcode" readonly class="field-readonly" />
+                    <button type="button" class="help-icon"
+                            title="Search addresses for this postcode"
+                            :disabled="!isEditMode || addressLookupLoading"
+                            @click="performAddressSearch">?</button>
+                  </div>
+                  <ul v-if="addressSuggestions.length" class="address-suggest-popover" role="listbox">
+                    <li v-for="(a, i) in addressSuggestions" :key="i"
+                        class="address-suggest-row" role="option" tabindex="0"
+                        @click="applySuggestion(a)"
+                        @keyup.enter="applySuggestion(a)">
+                      {{ a.label || [a.line_1, a.town, a.county, a.postcode].filter(Boolean).join(', ') }}
+                    </li>
+                  </ul>
+                  <span v-if="addressLookupError" class="form-error" role="alert">{{ addressLookupError }}</span>
+                  <span v-else-if="addressLookupInfo" class="form-info" role="status">{{ addressLookupInfo }}</span>
                 </div>
 
                 <label class="form-label-left">Address 1</label>
@@ -275,32 +347,38 @@
                 <label class="form-label-left">Town</label>
                 <input v-if="isEditMode" v-model="customerForm.city_town" maxlength="200" class="field-editable" />
                 <input v-else :value="customer.town" readonly class="field-readonly" />
+
+                <label class="form-label-left">County</label>
+                <input v-if="isEditMode" v-model="customerForm.county" maxlength="100" class="field-editable" />
+                <input v-else :value="customer.county" readonly class="field-readonly" />
+
+                <label class="form-label-left">Country</label>
+                <input v-if="isEditMode" v-model="customerForm.country" maxlength="50" class="field-editable" />
+                <input v-else :value="customer.country" readonly class="field-readonly" />
               </div>
-              <div v-if="!isEditMode" class="flex gap-sm mt-md" style="justify-content: space-between">
-                <!-- Address-search buttons are stubs while the postcode lookup
-                     on Add Case proves out; disabled here so operators don't
-                     click no-ops. Title attribute explains the state. -->
+              <div class="flex gap-sm mt-md" style="justify-content: space-between">
                 <button class="btn-action-light"
-                        disabled
-                        title="Address search reference is only available on Add Case for now."
-                        style="opacity:0.5;cursor:not-allowed;"
-                        @click.prevent>ENTER ADDRESS SEARCH REFERENCE</button>
+                        :disabled="!isEditMode"
+                        @click="openAddressReferenceModal">ENTER ADDRESS SEARCH REFERENCE</button>
                 <button class="btn-action-light"
-                        disabled
-                        title="Postcode lookup is wired on the Add Case screen — coming to Case Detail in a follow-up."
-                        style="opacity:0.5;cursor:not-allowed;"
-                        @click.prevent>PERFORM ADDRESS SEARCH</button>
+                        :disabled="!isEditMode"
+                        @click="openOffenderSearchModal">PERFORM ADDRESS SEARCH</button>
               </div>
+              <p v-if="customerForm.addressSearchReference" class="ref-pill">
+                Address reference: <strong>{{ customerForm.addressSearchReference }}</strong>
+                <button type="button" class="ref-clear" title="Clear" @click="customerForm.addressSearchReference = ''">×</button>
+              </p>
             </fieldset>
 
             <fieldset class="legend-group">
               <legend>Manual Verification</legend>
               <div class="form-row-left">
                 <label class="form-label-left">Verification Type</label>
-                <input v-if="isEditMode" v-model="customerForm.verification_type" maxlength="45" placeholder="e.g. Bank Statement" class="field-editable" />
-                <select v-else :value="customer.verificationType" disabled class="field-readonly">
-                  <option>{{ customer.verificationType }}</option>
+                <select v-if="isEditMode" v-model="customerForm.verification_type" class="field-editable">
+                  <option value="">Please Select</option>
+                  <option v-for="v in verificationTypeOptions" :key="v.lookup_data_id" :value="v.lookup_data_value">{{ v.lookup_data_value }}</option>
                 </select>
+                <input v-else :value="customer.verificationType" readonly class="field-readonly" />
 
                 <label class="form-label-left">Verification Notes</label>
                 <input v-if="isEditMode" v-model="customerForm.additional_info" maxlength="100" class="field-editable" />
@@ -433,48 +511,84 @@
           <div class="two-col">
             <div class="form-row-left">
               <label class="form-label-left">Reason for Issue</label>
-              <select :value="journey.reasonForIssue" disabled class="field-readonly"><option>{{ journey.reasonForIssue }}</option></select>
+              <select v-if="isEditMode" v-model="journeyForm.reason_for_issue" class="field-editable">
+                <option value="">Please Select</option>
+                <option v-for="r in reasonForIssueOptions" :key="r.lookup_data_id" :value="r.lookup_data_value">{{ r.lookup_data_value }}</option>
+              </select>
+              <input v-else :value="journey.reasonForIssue" readonly class="field-readonly" />
 
-              <label class="form-label-left">Rail Card</label>
-              <select :value="journey.railCard" disabled class="field-readonly"><option>Please Select</option></select>
+              <template v-if="isEditMode ? journeyForm.reason_for_issue === 'Failed to Carry Railcard' : journey.reasonForIssue === 'Failed to Carry Railcard'">
+                <label class="form-label-left">Rail Card</label>
+                <select v-if="isEditMode" v-model="journeyForm.other_reason_for_issue" class="field-editable">
+                  <option value="">Please Select</option>
+                  <option v-for="rc in railCardTypeOptions" :key="rc.railcard_id" :value="rc.name">{{ rc.name }}</option>
+                </select>
+                <input v-else :value="journey.railCard" readonly class="field-readonly" />
+              </template>
+
+              <label class="form-label-left">Questioned At</label>
+              <select v-if="isEditMode" v-model="journeyForm.questionedat_id" class="field-editable">
+                <option value="">Please Select</option>
+                <option v-for="opt in questionAtOptions" :key="opt.id" :value="opt.id">{{ opt.description }}</option>
+              </select>
+              <input v-else :value="journey.questionedAt" readonly class="field-readonly" />
 
               <label class="form-label-left">Place</label>
-              <input :value="journey.place" readonly class="field-readonly" />
+              <input v-if="isEditMode" v-model="journeyForm.place" maxlength="30" class="field-editable" />
+              <input v-else :value="journey.place" readonly class="field-readonly" />
 
               <label class="form-label-left">Journey From</label>
-              <input :value="journey.journeyFrom" readonly class="field-readonly" />
+              <input v-if="isEditMode" v-model="journeyForm.journey_from" maxlength="45" class="field-editable" />
+              <input v-else :value="journey.journeyFrom" readonly class="field-readonly" />
 
               <label class="form-label-left">Journey To</label>
-              <input :value="journey.journeyTo" readonly class="field-readonly" />
+              <input v-if="isEditMode" v-model="journeyForm.journey_to" maxlength="45" class="field-editable" />
+              <input v-else :value="journey.journeyTo" readonly class="field-readonly" />
 
               <label class="form-label-left">Time &amp; Date of Travel</label>
               <div class="datetime-pair">
-                <input :value="journey.travelTime" readonly class="field-readonly" />
-                <input :value="journey.travelDate" readonly class="field-readonly" />
+                <input v-if="isEditMode" v-model="journeyForm.travel_time" type="time" class="field-editable" />
+                <input v-else :value="journey.travelTime" readonly class="field-readonly" />
+                <input v-if="isEditMode" v-model="journeyForm.travel_date" type="date" class="field-editable" />
+                <input v-else :value="journey.travelDate" readonly class="field-readonly" />
               </div>
 
               <label class="form-label-left">Train Service Id</label>
-              <input :value="journey.trainServiceId" readonly placeholder="Train Service Id" class="field-readonly" />
+              <input v-if="isEditMode" v-model="journeyForm.headcode" maxlength="10" class="field-editable" placeholder="Train Service Id" />
+              <input v-else :value="journey.trainServiceId" readonly placeholder="Train Service Id" class="field-readonly" />
             </div>
 
             <div class="form-row-left">
               <label class="form-label-left">Smartcard Number</label>
-              <input :value="journey.smartcardNumber" readonly placeholder="Card Number" class="field-readonly" />
+              <input v-if="isEditMode" v-model="journeyForm.smartcard_number" maxlength="45" class="field-editable" placeholder="Card Number" />
+              <input v-else :value="journey.smartcardNumber" readonly placeholder="Card Number" class="field-readonly" />
 
               <label class="form-label-left">Fare Due</label>
-              <div class="input-currency"><span class="prefix">£</span><input :value="journey.fareDue" readonly class="field-readonly" /></div>
+              <div class="input-currency">
+                <span class="prefix">£</span>
+                <input v-if="isEditMode" v-model="journeyForm.fare_travelled" type="number" step="0.01" min="0" class="field-editable" />
+                <input v-else :value="journey.fareDue" readonly class="field-readonly" />
+              </div>
 
               <label class="form-label-left">Additional Penalty</label>
-              <div class="input-currency"><span class="prefix">£</span><input :value="journey.additionalPenalty" readonly class="field-readonly" /></div>
+              <div class="input-currency">
+                <span class="prefix">£</span>
+                <input v-if="isEditMode" v-model="journeyForm.additional_penalty" type="number" step="0.01" min="0" class="field-editable" />
+                <input v-else :value="journey.additionalPenalty" readonly class="field-readonly" />
+              </div>
 
               <label class="form-label-left">Total Due</label>
               <div class="input-currency"><span class="prefix">£</span><input :value="journey.totalDue" readonly class="field-readonly" /></div>
 
               <label class="form-label-left">Already Paid</label>
-              <div class="input-currency"><span class="prefix">£</span><input :value="journey.alreadyPaid" readonly class="field-readonly" /></div>
+              <div class="input-currency">
+                <span class="prefix">£</span>
+                <input v-if="isEditMode" v-model="journeyForm.fare_paid" type="number" step="0.01" min="0" class="field-editable" />
+                <input v-else :value="journey.alreadyPaid" readonly class="field-readonly" />
+              </div>
 
               <label class="form-label-left outstanding-label">Outstanding Balance</label>
-              <div class="input-currency"><span class="prefix">£</span><input :value="journey.outstanding" readonly class="field-readonly" /></div>
+              <div class="input-currency"><span class="prefix">£</span><input :value="journeyOutstanding" readonly class="field-readonly" /></div>
             </div>
           </div>
         </template>
@@ -974,11 +1088,22 @@
       </div>
     </div>
 
+    <!-- Save / Cancel bar — mirrors legacy panel-footer; appears below the tab
+         content at the bottom-right when the page is in edit mode. Saves all
+         editable sections (header card + customer details) in one click. -->
+    <div v-if="isEditMode"
+         style="display:flex;justify-content:flex-end;gap:8px;padding:12px 0;">
+      <button class="btn-action-light" :disabled="savingEdit" @click="cancelEdit">CANCEL</button>
+      <button class="btn-edit"         :disabled="savingEdit" @click="saveEdit">
+        {{ savingEdit ? 'SAVING…' : 'SAVE' }}
+      </button>
+    </div>
+
     <!-- LINK ADDITIONAL CASE modal — opens from the Linked Cases tab button.
          Shows auto-detect suggestions from /linkable/, lets the user pick one,
          then POSTs to /linked/ to create the revp_linked row.
          Mirrors legacy `getLinkedCasesRecordCount` (param=1) + linkData.create. -->
-    <div v-if="linkModalOpen" class="modal-backdrop" @click.self="linkModalOpen = false">
+    <div v-if="linkModalOpen" class="modal-backdrop">
       <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="link-modal-title"
            style="max-width: 880px; width: 90%;">
         <div class="modal-head">
@@ -1035,10 +1160,193 @@
       </div>
     </div>
 
+    <!-- Edit Action modal — pre-fills from the selected revp_actions row.
+         Fields: action name (title), holder, owner, status, actioned date,
+         notes, instruction. Target date is not editable via this endpoint. -->
+    <div v-if="editActionModalOpen" class="modal-backdrop">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="edit-action-modal-title"
+           style="max-width:540px;width:90%;">
+        <div class="modal-head">
+          <h2 id="edit-action-modal-title" class="modal-title">Edit Action</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="editActionModalOpen = false">×</button>
+        </div>
+        <div class="modal-body" style="padding:16px 20px;">
+          <div class="form-row-left">
+            <label class="form-label-left">Action Name</label>
+            <input v-model="editActionForm.title" maxlength="30" class="field-editable" />
+
+            <label class="form-label-left">Holder</label>
+            <select v-model="editActionForm.holder" class="field-editable">
+              <option value="">Please Select</option>
+              <option v-for="opt in actionHolderOwnerOptions" :key="opt.lookup_data_id" :value="opt.lookup_data_id">
+                {{ opt.lookup_data_value }}
+              </option>
+            </select>
+
+            <label class="form-label-left">Owner</label>
+            <select v-model="editActionForm.owner" class="field-editable">
+              <option value="">Please Select</option>
+              <option v-for="opt in actionHolderOwnerOptions" :key="opt.lookup_data_id" :value="opt.lookup_data_id">
+                {{ opt.lookup_data_value }}
+              </option>
+            </select>
+
+            <label class="form-label-left">Status</label>
+            <select v-model="editActionForm.action_status_id" class="field-editable">
+              <option value="">Please Select</option>
+              <option v-for="s in actionStatuses" :key="s.action_status_id" :value="s.action_status_id">
+                {{ s.status_desc }}
+              </option>
+            </select>
+
+            <label class="form-label-left">Actioned Date</label>
+            <input v-model="editActionForm.actioned_dt" type="date" class="field-editable" />
+
+            <label class="form-label-left">Notes</label>
+            <textarea v-model="editActionForm.notes" rows="3"
+                      style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:4px;font-family:inherit;font-size:13px;"></textarea>
+
+            <label class="form-label-left">Instruction</label>
+            <textarea v-model="editActionForm.instruction" rows="3"
+                      style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:4px;font-family:inherit;font-size:13px;"></textarea>
+          </div>
+          <p v-if="editActionError" role="alert"
+             style="color:#b91c1c;font-size:12px;margin-top:8px;">
+            {{ editActionError }}
+          </p>
+        </div>
+        <div class="modal-foot" style="padding:12px 20px;display:flex;justify-content:flex-end;gap:8px;">
+          <button type="button" class="btn-action-red"
+                  :disabled="editActionSaving" @click="editActionModalOpen = false">CANCEL</button>
+          <button type="button" class="btn-action-green"
+                  :disabled="editActionSaving" @click="submitEditAction">
+            {{ editActionSaving ? 'SAVING…' : 'SAVE' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Add Action modal — creates a fresh revp_actions row on this case.
+         Layout mirrors the legacy Add Action modal: 2-column top section
+         (Holder/Owner/Status | Target Date/Actioned?/Actioned Date),
+         then full-width Action, Instruction, Notes below. -->
+    <div v-if="addActionModalOpen" class="modal-backdrop">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="add-action-modal-title"
+           style="max-width:620px;width:92%;">
+        <div class="modal-head">
+          <h2 id="add-action-modal-title" class="modal-title">Add Action</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="addActionModalOpen = false">×</button>
+        </div>
+        <div class="modal-body" style="padding:16px 20px;">
+          <!-- 2-column section -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px 24px;margin-bottom:14px;">
+            <div>
+              <label class="form-label-left" style="display:block;margin-bottom:4px;">Holder</label>
+              <select v-model="addActionForm.holder" class="field-editable" style="width:100%;">
+                <option value="">Select Holder Type</option>
+                <option v-for="o in actionHolderOwnerOptions" :key="o.lookup_data_id" :value="o.lookup_data_id">
+                  {{ o.lookup_data_value }}
+                </option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label-left" style="display:block;margin-bottom:4px;">Target Date</label>
+              <input v-model="addActionForm.target_dt" type="date"
+                     class="field-editable" style="width:100%;" />
+            </div>
+            <div>
+              <label class="form-label-left" style="display:block;margin-bottom:4px;">Owner</label>
+              <select v-model="addActionForm.owner" class="field-editable" style="width:100%;">
+                <option value="">Select Owner Type</option>
+                <option v-for="o in actionHolderOwnerOptions" :key="o.lookup_data_id" :value="o.lookup_data_id">
+                  {{ o.lookup_data_value }}
+                </option>
+              </select>
+            </div>
+            <div style="display:flex;align-items:flex-end;padding-bottom:2px;">
+              <label class="form-label-left" style="margin-right:10px;margin-bottom:0;">Actioned?</label>
+              <input type="checkbox"
+                     :checked="addActionForm.actioned"
+                     @change="onActionedCheckboxChange"
+                     style="width:16px;height:16px;cursor:pointer;" />
+            </div>
+            <div>
+              <label class="form-label-left" style="display:block;margin-bottom:4px;">Status</label>
+              <select v-model="addActionForm.action_status_id" class="field-editable" style="width:100%;">
+                <option value="">Please Select</option>
+                <option v-for="s in actionStatuses" :key="s.action_status_id" :value="s.action_status_id">
+                  {{ s.status_desc }}
+                </option>
+              </select>
+            </div>
+            <div>
+              <label class="form-label-left" style="display:block;margin-bottom:4px;">Actioned Date</label>
+              <input v-model="addActionForm.actioned_dt" type="date"
+                     :disabled="!addActionForm.actioned"
+                     class="field-editable" style="width:100%;"
+                     :style="!addActionForm.actioned ? {background:'#f3f4f6',cursor:'not-allowed'} : {}" />
+            </div>
+          </div>
+          <!-- Full-width fields -->
+          <div style="margin-bottom:10px;">
+            <label class="form-label-left" style="display:block;margin-bottom:4px;">
+              Action <span style="color:#b91c1c">*</span>
+            </label>
+            <input v-model="addActionForm.title" maxlength="30"
+                   class="field-editable" style="width:100%;" />
+          </div>
+          <div style="margin-bottom:10px;">
+            <label class="form-label-left" style="display:block;margin-bottom:4px;">Instruction</label>
+            <input v-model="addActionForm.instruction" maxlength="5000"
+                   class="field-editable" style="width:100%;" />
+          </div>
+          <div>
+            <label class="form-label-left" style="display:block;margin-bottom:4px;">Notes</label>
+            <textarea v-model="addActionForm.notes" rows="4"
+                      style="width:100%;padding:6px 8px;border:1px solid #d1d5db;border-radius:4px;font-family:inherit;font-size:13px;resize:vertical;"></textarea>
+          </div>
+          <p v-if="addActionError" role="alert"
+             style="color:#b91c1c;font-size:12px;margin-top:8px;">
+            {{ addActionError }}
+          </p>
+        </div>
+        <div class="modal-foot" style="padding:12px 20px;display:flex;justify-content:flex-end;gap:8px;">
+          <button type="button" class="btn-action-red"
+                  :disabled="addActionSaving" @click="addActionModalOpen = false">CANCEL</button>
+          <button type="button" class="btn-action-green"
+                  :disabled="addActionSaving" @click="submitAddAction">
+            {{ addActionSaving ? 'SAVING…' : 'OK' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- "Confirm Action Closed?" sub-modal — shown when the user checks "Actioned?"
+         in the Add Action modal. Mirrors legacy #chkactionedmodal behaviour:
+         Yes → keeps checkbox checked + enables Actioned Date.
+         No  → reverts checkbox to unchecked + disables Actioned Date. -->
+    <div v-if="addActionConfirmOpen" class="modal-backdrop" style="z-index:1100;">
+      <div class="modal-panel" role="dialog" aria-modal="true"
+           style="max-width:400px;width:90%;">
+        <div class="modal-head">
+          <h2 class="modal-title">Confirm</h2>
+        </div>
+        <div class="modal-body" style="padding:16px 20px;">
+          <p style="font-size:13px;font-weight:600;margin:0;">
+            Confirm Action Closed? You will need to specify the 'Actioned Date' if you continue.
+          </p>
+        </div>
+        <div class="modal-foot" style="padding:12px 20px;display:flex;justify-content:flex-end;gap:8px;">
+          <button type="button" class="btn-action-red"   @click="confirmActionedNo">No</button>
+          <button type="button" class="btn-action-green" @click="confirmActionedYes">Yes</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Add Note modal — opens from Notes tab ADD button. Writes one
          revp_note row + one revp_audit_history row in a single backend
          transaction (mirrors legacy setNotesDetailsByCaseid). -->
-    <div v-if="noteModalOpen" class="modal-backdrop" @click.self="noteModalOpen = false">
+    <div v-if="noteModalOpen" class="modal-backdrop">
       <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="note-modal-title">
         <div class="modal-head">
           <h2 id="note-modal-title" class="modal-title">Add Note</h2>
@@ -1065,21 +1373,61 @@
         </div>
       </div>
     </div>
+    <DescriptionModal
+      v-model="descModalOpen"
+      :is-read-only="!isEditMode"
+      :description-data="_descDataForModal"
+      :busy="descFormBusy"
+      :error="descFormError"
+      @save="saveDescription"
+    />
+
+    <AddressReferenceModal
+      v-model="referenceModalOpen"
+      :customer-id="_caseRow?.customer_id ?? ''"
+      :case-id="String(route.params.caseid ?? '')"
+      :post-code="customerForm.post_code"
+      :address1="customerForm.address1"
+      :address2="customerForm.address2"
+      :town="customerForm.city_town"
+      :country="customerForm.country"
+      :first-name="customerForm.first_name"
+      :last-name="customerForm.surname"
+      :phone="customerForm.contact_number"
+      @save="val => customerForm.addressSearchReference = val"
+    />
+    <OffenderSearchModal
+      v-model="offenderSearchOpen"
+      :first-name="customerForm.first_name"
+      :last-name="customerForm.surname"
+      :postcode="customerForm.post_code"
+      :address1="customerForm.address1"
+      :address2="customerForm.address2"
+      :town="customerForm.city_town"
+      @pick="pickOffenderMatch"
+    />
+
   </AppLayout>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import Swal from 'sweetalert2'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { casesService }     from '@/services/cases.service.js'
 import { customersService } from '@/services/customers.service.js'
+import { lookupService }    from '@/services/lookup.service.js'
+import { api }              from '@/services/api.js'
 import { journeyService }   from '@/services/journey.service.js'
 import { vehiclesService }  from '@/services/vehicles.service.js'
 import { actionsService }        from '@/services/actions.service.js'
-import { actionTemplateService } from '@/services/action-template.service.js'
 import { courtsService }    from '@/services/courts.service.js'
 import { paymentsService }  from '@/services/payments.service.js'
+import { addressesService } from '@/services/addresses.service.js'
+import AddressReferenceModal from '@/components/AddressReferenceModal.vue'
+import OffenderSearchModal   from '@/components/OffenderSearchModal.vue'
+import DescriptionModal      from '@/components/DescriptionModal.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -1131,8 +1479,20 @@ async function enterEditMode() {
   editForm.case_status_id = _caseRow.value?.case_status_id || ''
   editForm.closure_reason = _caseRow.value?.closure_reason || ''
   editForm.closure_dt     = _toIsoDate(_caseRow.value?.closure_dt)
+  if (_journeyRaw.value) {
+    _populateJourneyForm()
+    ensureQuestionAtOptions()
+    _ensureRailCardTypeOptions()
+  }
+  // Load dropdown options BEFORE populating the form so v-model on <select>
+  // finds a matching option the moment the value is set.
+  await Promise.all([
+    ensureStatusOptions(),
+    _ensureTitleOptions(),
+    _ensureVerificationOptions(),
+    _ensureReasonOptions(),
+  ])
   _populateCustomerForm()
-  await ensureStatusOptions()
   isEditMode.value = true
 }
 
@@ -1163,6 +1523,12 @@ async function saveEdit() {
     // 3. Customer-side saves (skip if no customer linked to the case).
     const customerId = _caseRow.value?.customer_id
     if (customerId) {
+      const telErr = _validateContactNumber(customerForm.contact_number)
+      if (telErr) {
+        contactNumberError.value = telErr
+        throw new Error(telErr)
+      }
+
       await customersService.update(customerId, {
         title:          customerForm.title,
         first_name:     customerForm.first_name,
@@ -1173,19 +1539,56 @@ async function saveEdit() {
         address2:       customerForm.address2,
         city_town:      customerForm.city_town,
         post_code:      customerForm.post_code,
+        country:        customerForm.country,
+        county:         customerForm.county,
       })
 
-      // Description / verification are append-only — only fire when the
-      // operator actually filled something in.
+      // Description is append-only — only fire when any desc field changed.
       const hasDescChange = customerForm.date_of_birth || customerForm.gender
         || customerForm.occupation || customerForm.parent_guardian
+        || customerForm.mobile || customerForm.other_title
       if (hasDescChange) {
+        const prev = currentDescription.value
         await customersService.createDescription(customerId, {
           date_of_birth:   customerForm.date_of_birth || null,
-          gender:          customerForm.gender || null,
-          occupation:      customerForm.occupation || null,
+          gender:          customerForm.gender        || null,
+          occupation:      customerForm.occupation    || null,
           parent_guardian: customerForm.parent_guardian || null,
-          customer_age:    customerAgeDerived.value || null,
+          customer_age:    customerAgeDerived.value   || null,
+          mobile:          customerForm.mobile        || null,
+          other_title:     customerForm.other_title   || null,
+          // Carry forward physical description fields so the new row is
+          // a complete snapshot — avoids wiping physical data when the
+          // operator only edits DOB / gender / occupation fields.
+          build:                  prev?.build_id              || null,
+          hair_colour:            prev?.hair_colour_id        || null,
+          other_hair_colour:      prev?.other_hair_colour     || null,
+          hair_type:              prev?.hair_type_id          || null,
+          eye_colour:             prev?.eye_colour_id         || null,
+          other_eye_colour:       prev?.other_eye_colour      || null,
+          ethnic_appearance:      prev?.ethnic_appearance     || null,
+          ethnicity:              prev?.ethnicity             || null,
+          facial_hair_type:       prev?.facial_hair_type_id   || null,
+          other_facial_hair_type: prev?.other_facial_hair_type || null,
+          height:                 prev?.height                || null,
+          handed:                 prev?.handed_id             || null,
+          glasses:                prev?.glasses_id            || null,
+          body_camera:            prev?.body_camera           || null,
+          complexion:             prev?.complexion            || null,
+          bracelet:               Boolean(prev?.bracelet),
+          brooch:                 Boolean(prev?.brooch),
+          necklace:               Boolean(prev?.necklace),
+          watch:                  Boolean(prev?.watch),
+          pin:                    Boolean(prev?.pin),
+          pendant:                Boolean(prev?.pendant),
+          earrings:               Boolean(prev?.earrings),
+          ring:                   Boolean(prev?.ring),
+          other:                  Boolean(prev?.other),
+          jewellery_desc:         prev?.jewellery_desc     || null,
+          marks_and_scars:        prev?.marks_and_scars    || null,
+          tattoos:                prev?.tattoos            || null,
+          habitual_dress:         prev?.habitual_dress     || null,
+          additional_desc:        prev?.additional_desc    || null,
         })
       }
       if (customerForm.verification_type || customerForm.additional_info) {
@@ -1196,9 +1599,63 @@ async function saveEdit() {
       }
     }
 
-    // 4. Re-hydrate every tab from the server.
+    // 4. Journey save — only for non-PCN cases that already have a journey row.
+    //    case_id is intentionally omitted (read-only after creation per new API).
+    //    Fields match the old project's UPDATE column list exactly, with the
+    //    class→issued_at swap bug in the legacy code corrected here.
+    const journeyId = _journeyRaw.value?.journey_id
+    if (journeyId && !isPcnCase.value) {
+      // Recombine the split travel_date + travel_time fields back into a
+      // single ISO datetime string that the backend expects for travel_dt.
+      let travel_dt = null
+      if (journeyForm.travel_date) {
+        travel_dt = journeyForm.travel_time
+          ? `${journeyForm.travel_date}T${journeyForm.travel_time}:00`
+          : `${journeyForm.travel_date}T00:00:00`
+      }
+      const fareTravelled     = journeyForm.fare_travelled     !== '' ? Number(journeyForm.fare_travelled)     : null
+      const farePaid          = journeyForm.fare_paid          !== '' ? Number(journeyForm.fare_paid)          : null
+      const additionalPenalty = journeyForm.additional_penalty !== '' ? Number(journeyForm.additional_penalty) : null
+      await journeyService.update(journeyId, {
+        travel_dt,
+        place:                  journeyForm.place                  || null,
+        questionedat_id:        journeyForm.questionedat_id ? Number(journeyForm.questionedat_id) : null,
+        journey_from:           journeyForm.journey_from           || null,
+        journey_to:             journeyForm.journey_to             || null,
+        fare_paid:              farePaid,
+        fare_travelled:         fareTravelled,
+        reason_for_issue:       journeyForm.reason_for_issue       || null,
+        other_reason_for_issue: journeyForm.other_reason_for_issue || null,
+        smartcard_number:       journeyForm.smartcard_number       || null,
+        headcode:               journeyForm.headcode               || null,
+      })
+      // Mirror the old project's EditJourneyDetails case write-back.
+      // Formula: outstandingFare = (fareTravelled + additionalPenalty) − farePaid
+      //          amountDue       = outstandingFare + adminCost
+      const ft           = fareTravelled     ?? 0
+      const fp           = farePaid          ?? 0
+      const ap           = additionalPenalty ?? 0
+      const adminCost    = Number(_caseRow.value?.admin_cost || 0)
+      const outstandingFare = ft + ap - fp
+      await casesService.update(route.params.caseid, {
+        outstanding_fare:    outstandingFare,
+        court_restitution:   ft,
+        app_additional_amount: ap,
+        amount_due:          outstandingFare + adminCost,
+      })
+    }
+
+    // 5. Re-hydrate every tab from the server.
     await loadCase()
     isEditMode.value = false
+    Swal.fire({
+      icon: 'success',
+      title: 'Saved',
+      text: 'Case details have been updated successfully.',
+      timer: 2500,
+      timerProgressBar: true,
+      showConfirmButton: false,
+    })
   } catch (err) {
     loadError.value = err?.data?.detail || err?.message || 'Failed to save changes.'
   } finally {
@@ -1222,6 +1679,93 @@ function cancelEdit() {
 // round-trip into <input type="date">.
 const _caseRow = ref(null)
 
+// Raw journey API response — kept so enterEditMode() can seed journeyForm
+// without an extra fetch. Set by hydrateJourney().
+const _journeyRaw = ref(null)
+
+// Edit buffer for the Journey Details tab. Field names match the backend
+// PATCH payload (snake_case) so saveEdit() can pass them directly.
+// travel_date / travel_time are split from travel_dt for <input type="date|time">.
+const journeyForm = reactive({
+  travel_date: '', travel_time: '', departure_time: '',
+  place: '', questionedat_id: '',
+  journey_from: '', journey_to: '', train_departed_from: '',
+  fare_paid: '', fare_travelled: '', additional_penalty: '',
+  reason_for_issue: '', other_reason_for_issue: '',
+  smartcard_number: '', headcode: '',
+  offence_dt: '', offence_hour: '', offence_minute: '',
+  travel_class: '', issued_at: '', zero_fare_ticket_no: '',
+})
+
+// Questioned-at lookup options — loaded once when edit mode is first entered.
+const questionAtOptions = ref([])
+
+async function ensureQuestionAtOptions() {
+  if (questionAtOptions.value.length) return
+  try {
+    const data = await journeyService.getQuestionAtOptions()
+    questionAtOptions.value = Array.isArray(data) ? data : []
+  } catch (err) {
+    console.warn('[case-detail] could not load question-at options:', err)
+  }
+}
+
+// Railcard type options — loaded once when edit mode is first entered.
+const railCardTypeOptions = ref([])
+let _railCardTypesLoaded = false
+
+async function _ensureRailCardTypeOptions() {
+  if (_railCardTypesLoaded) return
+  try {
+    const d = await api.get('/revp/misc/railcards/')
+    railCardTypeOptions.value = d?.results || []
+    _railCardTypesLoaded = true
+  } catch { /* leave empty */ }
+}
+
+function _populateJourneyForm() {
+  const j = _journeyRaw.value
+  if (!j) return
+  // Split travel_dt (ISO datetime string) into separate date + time parts.
+  const travelIso = j.travel_dt || ''
+  journeyForm.travel_date         = travelIso ? travelIso.slice(0, 10) : ''
+  journeyForm.travel_time         = travelIso && travelIso.length >= 16 ? travelIso.slice(11, 16) : ''
+  journeyForm.departure_time      = j.departure_time || ''
+  journeyForm.place               = j.place || ''
+  journeyForm.questionedat_id     = j.questionedat?.id ?? ''
+  journeyForm.journey_from        = j.journey_from || ''
+  journeyForm.journey_to          = j.journey_to || ''
+  journeyForm.train_departed_from = j.train_departed_from || ''
+  journeyForm.fare_paid           = j.fare_paid != null ? String(j.fare_paid) : ''
+  journeyForm.fare_travelled      = j.fare_travelled != null ? String(j.fare_travelled) : ''
+  // additional_penalty lives on the case row (APPAdditionalAmount), seeded from _caseRow
+  journeyForm.additional_penalty  = _caseRow.value?.app_additional_amount != null
+    ? String(_caseRow.value.app_additional_amount) : ''
+  journeyForm.reason_for_issue    = j.reason_for_issue || ''
+  journeyForm.other_reason_for_issue = j.other_reason_for_issue || ''
+  journeyForm.smartcard_number    = j.smartcard_number || ''
+  journeyForm.headcode            = j.headcode || ''
+  journeyForm.offence_dt          = j.offence_dt || ''
+  journeyForm.offence_hour        = j.offence_hour != null ? String(j.offence_hour) : ''
+  journeyForm.offence_minute      = j.offence_minute != null ? String(j.offence_minute) : ''
+  journeyForm.travel_class        = j.travel_class || ''
+  journeyForm.issued_at           = j.issued_at || ''
+  journeyForm.zero_fare_ticket_no = j.zero_fare_ticket_no || ''
+}
+
+// Outstanding balance computed live from the edit-mode inputs so the
+// read-only Outstanding field updates as the operator types.
+// Old project formula: outstanding = (fareTravelled + additionalPenalty) − farePaid
+const journeyOutstanding = computed(() => {
+  if (!isEditMode.value) return journey.outstanding
+  const t = Number(journeyForm.fare_travelled || 0)
+  const a = Number(journeyForm.additional_penalty || 0)
+  const p = Number(journeyForm.fare_paid || 0)
+  return (journeyForm.fare_travelled !== '' || journeyForm.fare_paid !== '' || journeyForm.additional_penalty !== '')
+    ? (t + a - p).toFixed(2)
+    : journey.outstanding
+})
+
 // ── Customer Details tab edit buffer ──────────────────────────────────────
 // Captures the in-flight values for the Customer Details tab. Saved by
 // saveCustomerDetails() which fires four backend calls in sequence:
@@ -1230,20 +1774,162 @@ const _caseRow = ref(null)
 //   3. casesService.createVerification — revp_case_verification (append-only)
 //   4. casesService.update             — refuse_to_sign / unable_to_sign on revp_case
 const customerForm = reactive({
-  title: '', first_name: '', surname: '',
-  email: '', contact_number: '',
-  address1: '', address2: '', city_town: '', post_code: '',
+  title: '', other_title: '', first_name: '', surname: '',
+  email: '', contact_number: '', mobile: '',
+  address1: '', address2: '', city_town: '', post_code: '', country: '', county: '',
+  addressSearchReference: '',
   date_of_birth: '', gender: '', occupation: '', parent_guardian: '',
   verification_type: '', additional_info: '',
   customer_signature: '',  // 'Signature provided' | 'Refuse to sign' | 'Unable to sign'
+  customer_input_reconciled: false,
 })
+
+// Validation error for telephone shown inline below the field.
+const contactNumberError = ref('')
+
+function _validateContactNumber(val) {
+  if (!val) return null
+  const stripped = val.replace(/\s/g, '')
+  if (!/^[0-9\-+]+$/.test(stripped)) return 'Digits, - and + only'
+  if (stripped.length < 10) return 'Minimum 10 characters'
+  if (stripped.length > 13) return 'Maximum 13 characters'
+  return null
+}
+
+// Auto-infer gender from title selection — mirrors legacy JS in revpCaseListEdit.cfm.
+function onTitleChange(title) {
+  const map = { Mr: 'Male', Miss: 'Female', Mrs: 'Female', Ms: 'Female', Mx: 'Other', Dr: 'Other' }
+  if (map[title]) customerForm.gender = map[title]
+}
+
+// ── SHOW DESCRIPTION modal ──────────────────────────────────────────────────
+const descModalOpen  = ref(false)
+const descFormBusy   = ref(false)
+const descFormError  = ref('')
+
+// Convert the API response (build_id, hair_colour_id, etc.) to the flat
+// camelCase format DescriptionModal expects for its descriptionData prop.
+const _descDataForModal = computed(() => {
+  const d = currentDescription.value
+  if (!d) return null
+  return {
+    build:               d.build_id             || '',
+    hairColour:          d.hair_colour_id        || '',
+    otherHairColour:     d.other_hair_colour     || '',
+    hairType:            d.hair_type_id          || '',
+    eyeColour:           d.eye_colour_id         || '',
+    otherEyeColour:      d.other_eye_colour      || '',
+    ethnicAppearance:    d.ethnic_appearance     || '',
+    ethnicity:           d.ethnicity             || '',
+    facialHairType:      d.facial_hair_type_id   || '',
+    otherFacialHairType: d.other_facial_hair_type|| '',
+    height:              d.height                || '',
+    handed:              d.handed_id             || '',
+    glasses:             d.glasses_id            || '',
+    bodyCamera:          d.body_camera           || '',
+    complexion:          d.complexion            || '',
+    bracelet:       Boolean(d.bracelet),
+    brooch:         Boolean(d.brooch),
+    necklace:       Boolean(d.necklace),
+    watch:          Boolean(d.watch),
+    pin:            Boolean(d.pin),
+    pendant:        Boolean(d.pendant),
+    earrings:       Boolean(d.earrings),
+    ring:           Boolean(d.ring),
+    otherJewellery: Boolean(d.other),
+    jewelleryDesc:  d.jewellery_desc  || '',
+    marksAndScars:  d.marks_and_scars || '',
+    tattoos:        d.tattoos         || '',
+    habitualDress:  d.habitual_dress  || '',
+    additionalDesc: d.additional_desc || '',
+  }
+})
+
+function openDescriptionModal() {
+  descFormError.value = ''
+  descModalOpen.value = true
+}
+
+async function saveDescription(formData) {
+  const customerId = _caseRow.value?.customer_id
+  if (!customerId) return
+  descFormBusy.value  = true
+  descFormError.value = ''
+  try {
+    const prev = currentDescription.value
+    const payload = {
+      // Carry forward basic fields so the new row is a complete snapshot —
+      // avoids wiping DOB / gender / occupation when saving physical description.
+      date_of_birth:   prev?.date_of_birth   || null,
+      gender:          prev?.gender          || null,
+      occupation:      prev?.occupation      || null,
+      parent_guardian: prev?.parent_guardian || null,
+      customer_age:    prev?.customer_age    ?? null,
+      mobile:          prev?.mobile          || null,
+      other_title:     prev?.other_title     || null,
+      // Physical fields from the modal
+      build:                  formData.build               || null,
+      hair_colour:            formData.hairColour          || null,
+      other_hair_colour:      formData.otherHairColour     || null,
+      hair_type:              formData.hairType            || null,
+      eye_colour:             formData.eyeColour           || null,
+      other_eye_colour:       formData.otherEyeColour      || null,
+      ethnic_appearance:      formData.ethnicAppearance    || null,
+      ethnicity:              formData.ethnicity           || null,
+      facial_hair_type:       formData.facialHairType      || null,
+      other_facial_hair_type: formData.otherFacialHairType || null,
+      height:                 formData.height              || null,
+      handed:                 formData.handed              || null,
+      glasses:                formData.glasses             || null,
+      body_camera:            formData.bodyCamera          || null,
+      complexion:             formData.complexion          || null,
+      bracelet:               formData.bracelet,
+      brooch:                 formData.brooch,
+      necklace:               formData.necklace,
+      watch:                  formData.watch,
+      pin:                    formData.pin,
+      pendant:                formData.pendant,
+      earrings:               formData.earrings,
+      ring:                   formData.ring,
+      other:                  formData.otherJewellery,
+      jewellery_desc:         formData.jewelleryDesc   || null,
+      marks_and_scars:        formData.marksAndScars   || null,
+      tattoos:                formData.tattoos         || null,
+      habitual_dress:         formData.habitualDress   || null,
+      additional_desc:        formData.additionalDesc  || null,
+    }
+    const d = await customersService.createDescription(customerId, payload)
+    hydrateDescription(d)
+    descModalOpen.value = false
+  } catch (err) {
+    descFormError.value = err?.data?.detail || err?.message || 'Failed to save description.'
+  } finally {
+    descFormBusy.value = false
+  }
+}
 // customerSaving removed — `savingEdit` (declared near editForm) covers
 // the unified SAVE button now.
 
-// Title dropdown — legacy reads PERSON_TITLE from revp_lookup_data; we use
-// a static list here to avoid an extra fetch on tab entry. Swap for
-// lookupService.listByType('PERSON_TITLE') if you want live data.
-const TITLE_OPTIONS = ['Mr', 'Mrs', 'Miss', 'Ms', 'Dr', 'Master', 'Other']
+// Title, verification-type, and journey reason dropdowns — loaded lazily on first edit-mode entry.
+const titleOptions            = ref([])
+const verificationTypeOptions = ref([])
+const reasonForIssueOptions   = ref([])
+let _titleOptionsLoaded        = false
+let _verificationOptionsLoaded = false
+let _reasonOptionsLoaded       = false
+
+async function _ensureTitleOptions() {
+  if (_titleOptionsLoaded) return
+  try { titleOptions.value = await lookupService.listByType('PERSON_TITLE'); _titleOptionsLoaded = true } catch { /* use empty */ }
+}
+async function _ensureVerificationOptions() {
+  if (_verificationOptionsLoaded) return
+  try { verificationTypeOptions.value = await lookupService.listByType('CASE_VERIFICATION_TYPE'); _verificationOptionsLoaded = true } catch { /* use empty */ }
+}
+async function _ensureReasonOptions() {
+  if (_reasonOptionsLoaded) return
+  try { reasonForIssueOptions.value = await lookupService.listByType('CASE_REASON_FOR_ISSUE'); _reasonOptionsLoaded = true } catch { /* use empty */ }
+}
 
 // Customer signature lookup — three legacy options that map back to two
 // boolean flags on revp_case (refuse_to_sign, unable_to_sign). Empty
@@ -1269,25 +1955,50 @@ const customerAgeDerived = computed(() => {
 })
 
 function _populateCustomerForm() {
-  // Seed the edit buffer from the values currently rendered in the view.
-  // Gender map: customer.gender holds "Male"/"Female"/"Other" — backend
-  // validator accepts those long forms directly, so no remap needed.
   customerForm.title             = customer.title || ''
+  customerForm.other_title       = customer.otherTitle || ''
   customerForm.first_name        = customer.firstName || ''
   customerForm.surname           = customer.lastName || ''
   customerForm.email             = customer.email || ''
   customerForm.contact_number    = customer.telephone || ''
+  customerForm.mobile            = customer.mobileTelephone || ''
   customerForm.address1          = customer.address1 || ''
   customerForm.address2          = customer.address2 || ''
   customerForm.city_town         = customer.town || ''
   customerForm.post_code         = customer.postcode || ''
-  customerForm.date_of_birth     = _toIsoDate(customer.dob)
+  customerForm.country           = customer.country || ''
+  customerForm.county                 = customer.county || ''
+  customerForm.addressSearchReference = ''
+  customerForm.date_of_birth          = currentDescription.value?.date_of_birth || ''
   customerForm.gender            = customer.gender || ''
   customerForm.occupation        = customer.employmentStatus || ''
   customerForm.parent_guardian   = customer.parentGuardian || ''
   customerForm.verification_type = customer.verificationType || ''
   customerForm.additional_info   = customer.verificationNotes || ''
-  customerForm.customer_signature = customer.customerSignature || ''
+  customerForm.customer_signature        = customer.customerSignature || ''
+  customerForm.customer_input_reconciled = customer.customerInputReconciled || false
+  contactNumberError.value = ''
+}
+
+const referenceModalOpen   = ref(false)
+const offenderSearchOpen   = ref(false)
+const addressSuggestions   = ref([])
+const addressLookupLoading = ref(false)
+const addressLookupError   = ref('')
+const addressLookupInfo    = ref('')
+
+function openAddressReferenceModal() { referenceModalOpen.value = true }
+function openOffenderSearchModal()   { offenderSearchOpen.value = true }
+
+function pickOffenderMatch(m) {
+  if (m.first_name) customerForm.first_name      = m.first_name
+  if (m.last_name)  customerForm.surname         = m.last_name
+  if (m.address1)   customerForm.address1        = m.address1
+  if (m.address2)   customerForm.address2        = m.address2
+  if (m.town)       customerForm.city_town       = m.town
+  if (m.postcode)   customerForm.post_code       = m.postcode
+  if (m.telephone)  customerForm.contact_number  = m.telephone
+  if (m.email)      customerForm.email           = m.email
 }
 
 // saveCustomerDetails() merged into the single top-level saveEdit() above
@@ -1447,7 +2158,7 @@ async function loadCase() {
       casesService.getVerification(c.case_id),
       casesService.listAudit(c.case_id),
       casesService.listOffences(c.case_id),
-      c.case_type_id ? actionTemplateService.getAll(c.case_type_id) : Promise.resolve([]),
+      actionsService.listByCase(c.case_id),
       c.court_id          ? courtsService.get(c.court_id)             : Promise.resolve(null),
       c.court_booking_id  ? courtsService.getBooking(c.court_booking_id)   : Promise.resolve(null),
       paymentsService.listByCase(c.case_id),
@@ -1484,6 +2195,16 @@ async function loadCase() {
 
     if (jrnResult.status === 'fulfilled' && jrnResult.value) {
       hydrateJourney(jrnResult.value)
+      // additionalPenalty lives on the case (APPAdditionalAmount), not the journey.
+      // totalDue and outstanding follow the old project formula:
+      //   totalDue       = fareTravelled + additionalPenalty
+      //   outstanding    = totalDue − farePaid
+      const addPenalty  = Number(c.app_additional_amount || 0)
+      const fareTrav    = Number(jrnResult.value.fare_travelled || 0)
+      const farePd      = Number(jrnResult.value.fare_paid      || 0)
+      journey.additionalPenalty = addPenalty ? String(addPenalty) : ''
+      journey.totalDue          = (fareTrav + addPenalty).toFixed(2)
+      journey.outstanding       = (fareTrav + addPenalty - farePd).toFixed(2)
       journeyLoaded.value = true
     } else if (jrnResult.status === 'rejected') {
       journeyError.value = jrnResult.reason?.data?.detail
@@ -1507,14 +2228,15 @@ async function loadCase() {
       offences.value = offResult.value
     }
     if (actsResult.status === 'fulfilled' && actsResult.value) {
-      const rows = actsResult.value.results ?? actsResult.value ?? []
-      actions.value = rows.map((t, i) => ({
-        id:         t.action_template_id || i,
-        holder:     t.holder || '',
-        action:     t.name || '',
-        targetDate: t.work_from_date ? fmtDate(_offsetDate(c.case_dt, t.days_offset)) : '',
-        actioned:   '',
-        status:     '',
+      const rows = actsResult.value.results ?? (Array.isArray(actsResult.value) ? actsResult.value : [])
+      _actionsRaw.value = rows
+      actions.value = rows.map(a => ({
+        id:         a.action_id,
+        holder:     a.holder_name || a.holder || '',
+        action:     a.action_name || a.title || '',
+        targetDate: fmtDate(a.target_dt),
+        actioned:   fmtDate(a.actioned_dt),
+        status:     a.action_status_desc || '',
       }))
     }
     if (courtResult.status === 'fulfilled' && courtResult.value) {
@@ -1573,25 +2295,26 @@ function hydrateCustomer(c) {
   customer.lastName        = c.surname        || ''
   customer.email           = c.email          || ''
   customer.telephone       = c.contact_number || ''
-  customer.mobileTelephone = c.contact_number || ''  // single column in legacy schema
   customer.postcode        = c.post_code      || ''
   customer.address1        = c.address1       || ''
   customer.address2        = c.address2       || ''
   customer.town            = c.city_town      || ''
+  customer.country         = c.country        || ''
+  customer.county          = c.county         || ''
 }
 
+// Holds the last-fetched raw description object for the SHOW DESCRIPTION modal.
+const currentDescription = ref(null)
+
 function hydrateDescription(d) {
-  // DOB is stored on revp_customer_desc; age is derived for display.
-  // Suppress DOB rendering when the stored value resolves to today or
-  // a future date (legacy artefact from when the form let the user
-  // accidentally pick today) — show blank rather than a misleading value.
+  currentDescription.value = d
   const ageVal = ageFromDob(d.date_of_birth)
-  customer.dob = ageVal === '' ? '' : fmtDate(d.date_of_birth)
-  customer.age = ageVal !== '' ? ageVal : ''
+  customer.dob              = ageVal === '' ? '' : fmtDate(d.date_of_birth)
+  customer.age              = ageVal !== '' ? ageVal : ''
   customer.employmentStatus = d.occupation      || ''
   customer.parentGuardian   = d.parent_guardian || ''
-  // gender comes back as 'M' / 'F' / 'O'; the template radios compare to
-  // 'Male' / 'Female' / 'Other', so map back to the long form.
+  customer.mobileTelephone  = d.mobile          || ''
+  customer.otherTitle       = d.other_title     || ''
   const g = (d.gender || '').toUpperCase()
   customer.gender = g === 'M' ? 'Male' : g === 'F' ? 'Female' : g === 'O' ? 'Other' : ''
 }
@@ -1626,6 +2349,7 @@ function hydrateVehicle(v) {
 }
 
 function hydrateJourney(j) {
+  _journeyRaw.value = j
   journey.place           = j.place              || ''
   journey.journeyFrom     = j.journey_from       || ''
   journey.journeyTo       = j.journey_to         || ''
@@ -1641,7 +2365,9 @@ function hydrateJourney(j) {
   journey.outstanding = (j.fare_travelled != null || j.fare_paid != null)
     ? (t - p).toFixed(2)
     : ''
-  journey.reasonForIssue = j.reason_for_issue || ''
+  journey.reasonForIssue  = j.reason_for_issue       || ''
+  journey.railCard        = j.other_reason_for_issue || ''
+  journey.questionedAt    = j.questionedat?.description || ''
 }
 
 function refresh() { loadCase() }
@@ -1651,16 +2377,19 @@ function refresh() { loadCase() }
 // dedicated endpoints — see CLAUDE.md plan.md for the backlog. The shells
 // below render empty so the UI is honest about what we know vs. what's TBD.
 const customer = reactive({
-  title: '', firstName: '', lastName: '', dob: '', age: '', gender: '',
+  title: '', otherTitle: '', firstName: '', lastName: '', dob: '', age: '', gender: '',
   telephone: '', mobileTelephone: '', email: '', employmentStatus: '',
   parentGuardian: '', postcode: '', address1: '', address2: '', town: '',
+  country: '', county: '',
   verificationType: '', verificationNotes: '', customerSignature: '',
+  customerInputReconciled: false,
 })
 
 const journey = reactive({
   reasonForIssue: '', railCard: '', place: '', journeyFrom: '', journeyTo: '',
   travelTime: '', travelDate: '', trainServiceId: '', smartcardNumber: '',
   fareDue: '', additionalPenalty: '', totalDue: '', alreadyPaid: '', outstanding: '',
+  questionedAt: '',
 })
 
 // Car Park / PCN vehicle data — only populated when the case has
@@ -1717,6 +2446,110 @@ const payment = reactive({
 })
 
 const actions = ref([])
+// Raw action objects from the API — used by the Edit modal to pre-fill fields.
+const _actionsRaw = ref([])
+
+// ── Actions tab selection + busy state ──────────────────────────────────────
+const selectedActionIds = reactive(new Set())
+const actionBusy        = ref(false)
+const actionError       = ref('')
+
+const selectedActionCount = computed(() => selectedActionIds.size)
+const allActionsSelected  = computed(() =>
+  actions.value.length > 0 && actions.value.every(a => selectedActionIds.has(a.id))
+)
+
+// True when the case is in a terminal CLOSED status — locks all row checkboxes
+// and write-action buttons (mirrors legacy `case_status_id == '256E6691-...'` check).
+const isCaseClosed = computed(() =>
+  (caseDetails.caseStatus || '').trim().toUpperCase() === 'CLOSED'
+)
+
+// Clear any checked rows the moment the case transitions to CLOSED so stale
+// selections can't drive a Close & Action or Edit call.
+watch(isCaseClosed, (closed) => {
+  if (closed) selectedActionIds.clear()
+})
+
+watch(() => journeyForm.reason_for_issue, (val) => {
+  if (val !== 'Failed to Carry Railcard') journeyForm.other_reason_for_issue = ''
+})
+function toggleAction(id) {
+  selectedActionIds.has(id) ? selectedActionIds.delete(id) : selectedActionIds.add(id)
+}
+function toggleAllActions() {
+  if (allActionsSelected.value) {
+    selectedActionIds.clear()
+  } else {
+    actions.value.forEach(a => selectedActionIds.add(a.id))
+  }
+}
+
+// Reload just the actions list without re-fetching the entire case.
+async function reloadActions() {
+  const caseId = route.params.caseid
+  if (!caseId) return
+  try {
+    const data = await actionsService.listByCase(caseId)
+    const rows = data?.results ?? (Array.isArray(data) ? data : [])
+    _actionsRaw.value = rows
+    actions.value = rows.map(a => ({
+      id:         a.action_id,
+      holder:     a.holder_name || a.holder || '',
+      action:     a.action_name || a.title || '',
+      targetDate: fmtDate(a.target_dt),
+      actioned:   fmtDate(a.actioned_dt),
+      status:     a.action_status_desc || '',
+    }))
+  } catch (e) {
+    console.warn('[case-detail] failed to reload actions', e)
+  }
+}
+
+// ── Action modal reference data — statuses + holder/owner options ────────────
+// Loaded lazily the first time either modal is opened; cached after that.
+const actionStatuses          = ref([])
+const actionHolderOwnerOptions = ref([])
+async function ensureActionRefData() {
+  if (actionStatuses.value.length) return
+  try {
+    const [s, opts] = await Promise.allSettled([
+      actionsService.statuses(),
+      actionsService.modalOptions(),
+    ])
+    if (s.status === 'fulfilled')
+      actionStatuses.value = Array.isArray(s.value) ? s.value : []
+    if (opts.status === 'fulfilled')
+      actionHolderOwnerOptions.value = opts.value?.holder_owner_options ?? []
+  } catch (e) {
+    console.warn('[case-detail] could not load action reference data', e)
+  }
+}
+
+// ── Add New Action modal ─────────────────────────────────────────────────────
+const addActionModalOpen = ref(false)
+const addActionForm = reactive({
+  title: '', holder: '', owner: '', action_status_id: '',
+  target_dt: '', actioned: false, actioned_dt: '',
+  notes: '', instruction: '',
+})
+const addActionError       = ref('')
+const addActionSaving      = ref(false)
+const addActionConfirmOpen = ref(false)
+// Helper: find status ID by description regex
+function _findStatusId(pattern) {
+  return (actionStatuses.value.find(s => pattern.test(s.status_desc)) || {}).action_status_id || ''
+}
+
+// ── Edit Action modal ────────────────────────────────────────────────────────
+const editActionModalOpen = ref(false)
+const editActionForm = reactive({
+  action_id: '', title: '', holder: '', owner: '', action_status_id: '',
+  actioned_dt: '', notes: '', instruction: '',
+})
+const editActionError  = ref('')
+const editActionSaving = ref(false)
+
 const offences = ref([])
 const notes = ref([])
 const attachments = ref([])
@@ -1735,7 +2568,17 @@ const noteText      = ref('')
 const noteSaving    = ref(false)
 const noteError     = ref('')
 
-onMounted(loadCase)
+onMounted(async () => {
+  await loadCase()
+  // When the page opens with ?mode=edit (e.g. deep-link from the case list),
+  // isEditMode is already true and enterEditMode() is never called.
+  // Seed dropdown options and form values here so every field comes up filled.
+  if (isEditMode.value) {
+    await Promise.all([ensureStatusOptions(), _ensureTitleOptions(), _ensureVerificationOptions(), _ensureReasonOptions()])
+    _populateCustomerForm()
+    if (_journeyRaw.value) { _populateJourneyForm(); ensureQuestionAtOptions(); _ensureRailCardTypeOptions() }
+  }
+})
 
 const tabs = computed(() => [
   { id: 'actions',     label: 'ACTIONS' },
@@ -1761,13 +2604,349 @@ function sortIcon(key) { return sortKey.value === key ? (sortDir.value === 'asc'
 
 // editCase() removed — the header bar now drives mode switching via
 // enterEditMode / saveEdit / cancelEdit instead of a no-op stub.
-function closeAction()               { /* TODO */ }
-function editAction()                { /* TODO */ }
-function addNewAction()              { /* TODO */ }
-function exportExcel(_section)       { /* TODO */ }
+async function closeAction() {
+  const ids = [...selectedActionIds]
+  if (ids.length === 0) {
+    actionError.value = 'Select at least one action first.'
+    setTimeout(() => { if (actionError.value.startsWith('Select')) actionError.value = '' }, 3000)
+    return
+  }
+
+  const confirm = await Swal.fire({
+    title: 'Close & Action',
+    text: `Close ${ids.length} action${ids.length === 1 ? '' : 's'} and unlock any successors?`,
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonText: 'OK',
+    cancelButtonText: 'Cancel',
+    confirmButtonColor: '#198754',
+    cancelButtonColor: '#6c757d',
+  })
+  if (!confirm.isConfirmed) return
+
+  actionBusy.value  = true
+  actionError.value = ''
+  try {
+    const res      = await actionsService.closeAndAction(ids)
+    const closed   = res?.closed   ?? 0
+    const unlocked = res?.unlocked ?? 0
+    const skipped  = res?.skipped  ?? []
+    let msg = `Closed ${closed} action${closed === 1 ? '' : 's'}`
+    if (unlocked > 0) msg += `, unlocked ${unlocked} successor${unlocked === 1 ? '' : 's'}`
+    if (skipped.length) {
+      msg += `, skipped ${skipped.length}`
+      console.warn('[close-and-action] skipped', skipped)
+    }
+    await Swal.fire({
+      icon: 'success',
+      title: 'Done',
+      text: msg,
+      showConfirmButton: false,
+      timer: 2500,
+      timerProgressBar: true,
+    })
+    selectedActionIds.clear()
+    await reloadActions()
+  } catch (e) {
+    actionError.value = e?.data?.detail || e?.message || 'CLOSE & ACTION failed.'
+  } finally {
+    actionBusy.value = false
+  }
+}
+
+async function editAction() {
+  if (selectedActionIds.size === 0) {
+    actionError.value = 'Select an action to edit.'
+    setTimeout(() => { if (actionError.value.startsWith('Select')) actionError.value = '' }, 3000)
+    return
+  }
+  if (selectedActionIds.size > 1) {
+    actionError.value = 'Select only one action to edit.'
+    setTimeout(() => { if (actionError.value.startsWith('Select')) actionError.value = '' }, 3000)
+    return
+  }
+  const id  = [...selectedActionIds][0]
+  const raw = _actionsRaw.value.find(a => a.action_id === id)
+  if (!raw) return
+  editActionForm.action_id        = raw.action_id
+  editActionForm.title            = raw.action_name || raw.title || ''
+  editActionForm.holder           = raw.holder || ''
+  editActionForm.owner            = raw.owner  || ''
+  editActionForm.action_status_id = raw.action_status_id || ''
+  editActionForm.actioned_dt      = raw.actioned_dt ? raw.actioned_dt.slice(0, 10) : ''
+  editActionForm.notes            = raw.notes       || ''
+  editActionForm.instruction      = raw.instruction || ''
+  editActionError.value  = ''
+  editActionSaving.value = false
+  await ensureActionRefData()
+  editActionModalOpen.value = true
+}
+
+async function submitEditAction() {
+  editActionSaving.value = true
+  editActionError.value  = ''
+  try {
+    const payload = {
+      title:            editActionForm.title.trim()            || undefined,
+      holder:           editActionForm.holder                  || undefined,
+      owner:            editActionForm.owner                   || undefined,
+      action_status_id: editActionForm.action_status_id        || undefined,
+      actioned_dt:      editActionForm.actioned_dt             || undefined,
+      notes:            editActionForm.notes                   || undefined,
+      instruction:      editActionForm.instruction             || undefined,
+    }
+    await actionsService.update(editActionForm.action_id, payload)
+    editActionModalOpen.value = false
+    await reloadActions()
+  } catch (e) {
+    editActionError.value = e?.data?.detail || e?.message || 'Failed to save action.'
+  } finally {
+    editActionSaving.value = false
+  }
+}
+
+// "Actioned?" checkbox intercept — shows confirm modal before committing the check.
+function onActionedCheckboxChange(e) {
+  if (e.target.checked) {
+    addActionForm.actioned = true   // commit so Vue tracks the change; confirm decides fate
+    addActionConfirmOpen.value = true
+  } else {
+    addActionForm.actioned         = false
+    addActionForm.action_status_id = _findStatusId(/^open$/i)
+  }
+}
+function confirmActionedYes() {
+  addActionForm.actioned         = true
+  addActionForm.action_status_id = _findStatusId(/closed/i)
+  addActionConfirmOpen.value     = false
+}
+function confirmActionedNo() {
+  addActionForm.actioned         = false
+  addActionForm.action_status_id = _findStatusId(/^open$/i)
+  addActionConfirmOpen.value     = false
+}
+
+async function addNewAction() {
+  addActionForm.title            = ''
+  addActionForm.holder           = ''
+  addActionForm.owner            = ''
+  addActionForm.action_status_id = ''
+  addActionForm.target_dt        = ''
+  addActionForm.actioned         = false
+  addActionForm.actioned_dt      = new Date().toISOString().slice(0, 10)
+  addActionForm.notes            = ''
+  addActionForm.instruction      = ''
+  addActionError.value       = ''
+  addActionSaving.value      = false
+  addActionConfirmOpen.value = false
+  await ensureActionRefData()
+  addActionModalOpen.value = true
+}
+
+async function submitAddAction() {
+  if (!addActionForm.title.trim()) {
+    addActionError.value = 'Action name is required.'
+    return
+  }
+  addActionSaving.value = true
+  addActionError.value  = ''
+  try {
+    await actionsService.create({
+      case_id:          route.params.caseid,
+      title:            addActionForm.title.trim(),
+      holder:           addActionForm.holder           || undefined,
+      owner:            addActionForm.owner            || undefined,
+      action_status_id: addActionForm.action_status_id || undefined,
+      target_dt:        addActionForm.target_dt || undefined,
+      actioned_dt:      addActionForm.actioned && addActionForm.actioned_dt
+                          ? addActionForm.actioned_dt
+                          : undefined,
+      notes:            addActionForm.notes            || undefined,
+      instruction:      addActionForm.instruction      || undefined,
+    })
+    addActionModalOpen.value = false
+    await reloadActions()
+  } catch (e) {
+    addActionError.value = e?.data?.detail || e?.message || 'Failed to create action.'
+  } finally {
+    addActionSaving.value = false
+  }
+}
+
+async function exportExcel(section) {
+  if (section !== 'actions') return
+  try {
+    await actionsService.exportByCase(route.params.caseid)
+  } catch (e) {
+    actionError.value = e?.message || 'Export failed.'
+    setTimeout(() => { actionError.value = '' }, 4000)
+  }
+}
 function showDescription()           { /* TODO */ }
 function enterAddressSearchReference(){ /* TODO */ }
-function performAddressSearch()      { /* TODO */ }
+
+async function performAddressSearch() {
+  if (!isEditMode.value) return
+  const pc = (customerForm.post_code || '').trim()
+  if (!pc) {
+    addressLookupError.value = 'Enter a postcode first.'
+    return
+  }
+  addressLookupLoading.value = true
+  addressLookupError.value   = ''
+  addressLookupInfo.value    = ''
+  addressSuggestions.value   = []
+  try {
+    const results = await addressesService.lookup(pc)
+    if (results.length === 0) {
+      addressLookupError.value = 'Postcode not found.'
+      return
+    }
+    addressSuggestions.value = results
+  } catch (err) {
+    addressLookupError.value = err?.data?.detail || err?.message || 'Address lookup failed.'
+  } finally {
+    addressLookupLoading.value = false
+  }
+}
+
+async function applySuggestion(a) {
+  // Addressy postcode container (type='Postcode') — drill in,
+  // matching selectCountry(id) in address.cfc.
+  if (a._addressyType === 'Postcode') {
+    if (a.postcode) {
+      const normalized = a.postcode.trim().toUpperCase().replace(/\s+/g, '')
+      _cdLastAutoLookedUp = normalized   // prevent the watch firing another find
+      customerForm.post_code = a.postcode
+    }
+    addressLookupError.value   = ''
+    addressLookupInfo.value    = ''
+    addressLookupLoading.value = true
+    try {
+      const results = await addressesService.addressyFind(customerForm.post_code, a.id)
+      addressSuggestions.value = results.length
+        ? results.map(r => ({ id: r.id, postcode: r.postcode, label: r.description, _addressyType: r.type }))
+        : []
+      if (!results.length) addressLookupError.value = 'No addresses found for this area.'
+    } catch (_) {
+      addressLookupError.value = 'Address lookup failed.'
+    } finally {
+      addressLookupLoading.value = false
+    }
+    return
+  }
+
+  // Addressy address item (any non-Postcode type with _addressyType set) —
+  // retrieve full details, matching selectAddress(id) in address.cfc.
+  if (a._addressyType !== undefined) {
+    addressLookupLoading.value = true
+    addressLookupError.value   = ''
+    addressSuggestions.value   = []
+    try {
+      const result = await addressesService.addressyRetrieve(a.id)
+      if (result.line1)       customerForm.address1  = result.line1
+      if (result.line2)       customerForm.address2  = result.line2
+      if (result.city)        customerForm.city_town = result.city
+      if (result.postal_code) {
+        const normalized = result.postal_code.trim().toUpperCase().replace(/\s+/g, '')
+        _cdLastAutoLookedUp = normalized   // prevent watch re-triggering a lookup
+        customerForm.post_code = result.postal_code
+      }
+      addressLookupInfo.value = result.line1
+        ? `Filled from ${result.city || result.postal_code}. Adjust house number if needed.`
+        : `Postcode matched: ${result.postal_code}. Please enter Address 1 and Address 2.`
+    } catch (_) {
+      addressLookupError.value = 'Failed to retrieve address details.'
+    } finally {
+      addressLookupLoading.value = false
+    }
+    return
+  }
+
+  // postcodes.io lookup result (from the "?" button) — fill fields directly.
+  if (a.line_1)   customerForm.address1  = a.line_1
+  if (a.line_2)   customerForm.address2  = a.line_2
+  if (a.town)     customerForm.city_town = a.town
+  if (a.postcode) customerForm.post_code = a.postcode
+  const where = [a.town, a.county].filter(Boolean).join(', ')
+  addressLookupInfo.value = a.line_1
+    ? `Filled from ${where || a.postcode}. Adjust house number if needed.`
+    : `Postcode matched: ${where || a.postcode}. Please enter Address 1 and Address 2.`
+  addressSuggestions.value = []
+}
+
+// Auto-lookup as the user types:
+//   3+ chars but not a full postcode → Addressy find (containers + addresses)
+//   full postcode                    → postcodes.io address lookup (fill fields)
+const _CD_POSTCODE_RE = /^[A-Z]{1,2}[0-9][A-Z0-9]?[0-9][A-Z]{2}$/
+let _cdPostcodeLookupTimer = null
+let _cdLastAutoLookedUp = ''
+
+watch(() => customerForm.post_code, (newVal) => {
+  if (!isEditMode.value) return
+  if (_cdPostcodeLookupTimer) clearTimeout(_cdPostcodeLookupTimer)
+
+  const trimmed    = (newVal || '').trim()
+  const normalized = trimmed.toUpperCase().replace(/\s+/g, '')
+
+  // Full postcode — do a full address lookup (debounced 500 ms).
+  if (_CD_POSTCODE_RE.test(normalized)) {
+    if (normalized === _cdLastAutoLookedUp) return
+    _cdPostcodeLookupTimer = setTimeout(() => {
+      _cdLastAutoLookedUp = normalized
+      performAddressSearch()
+    }, 500)
+    return
+  }
+
+  // Too short — clear state.
+  if (trimmed.length < 3) {
+    addressSuggestions.value = []
+    addressLookupError.value = ''
+    addressLookupInfo.value  = ''
+    return
+  }
+
+  // Partial (3+ chars, not yet a full postcode) — Addressy find (debounced 400 ms).
+  // Mirrors the keyup handler in customerdetails.cfm: selectCountry('') when length > 3.
+  _cdPostcodeLookupTimer = setTimeout(async () => {
+    addressLookupError.value   = ''
+    addressLookupInfo.value    = ''
+    addressLookupLoading.value = true
+    try {
+      const results = await addressesService.addressyFind(trimmed)
+      addressSuggestions.value = results.length
+        ? results.map(r => ({ id: r.id, postcode: r.postcode, label: r.description, _addressyType: r.type }))
+        : []
+      if (!results.length) addressLookupError.value = 'No matching postcodes found.'
+    } catch (_) {
+      // Addressy errors are non-critical; fail silently.
+    } finally {
+      addressLookupLoading.value = false
+    }
+  }, 400)
+})
+
+function _dismissCdSuggestionsOnEscape(e) {
+  if (e.key === 'Escape') addressSuggestions.value = []
+}
+function _dismissCdSuggestionsOnClickOutside(e) {
+  const popover = document.querySelector('.address-suggest-popover')
+  const target  = e.target
+  if (popover && !popover.contains(target) && !target.closest('.input-with-icon')) {
+    addressSuggestions.value = []
+  }
+}
+watch(addressSuggestions, (rows) => {
+  if (rows.length) {
+    document.addEventListener('keydown', _dismissCdSuggestionsOnEscape)
+    document.addEventListener('mousedown', _dismissCdSuggestionsOnClickOutside)
+  } else {
+    document.removeEventListener('keydown', _dismissCdSuggestionsOnEscape)
+    document.removeEventListener('mousedown', _dismissCdSuggestionsOnClickOutside)
+  }
+})
+
 function addOffence()                { /* TODO */ }
 function overrideAdmin()             { /* TODO */ }
 function registerPayment()           { /* TODO */ }
@@ -2179,4 +3358,67 @@ async function confirmLink() {
 :deep(tbody td) { padding: 11px 12px 11px 0; }
 
 .case-mode-hint { display: flex; align-items: center; }
+
+/* ── Modal overlay ──────────────────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+.modal-panel {
+  background: #fff;
+  border-radius: 6px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  display: flex; flex-direction: column;
+  max-height: 90vh; overflow-y: auto;
+}
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border, #e5e7eb);
+  position: sticky; top: 0; background: #fff; z-index: 1;
+}
+.modal-title { margin: 0; font-size: 1rem; font-weight: 600; }
+.modal-close {
+  border: none; background: transparent;
+  font-size: 1.5rem; line-height: 1;
+  cursor: pointer; color: #6b7280; padding: 0 4px;
+}
+.modal-close:hover { color: #b91c1c; }
+.row-selected { background: #f0fdf4; }
+
+.form-error { display: block; margin-top: 6px; font-size: 12px; color: #b91c1c; }
+.form-info  { display: block; margin-top: 6px; font-size: 12px; color: #047857; }
+
+.address-suggest-popover {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  background: #fff;
+  border: 1px solid var(--border, #d1d5db);
+  border-radius: var(--radius-sm, 6px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+  list-style: none;
+  padding: 4px 0;
+  margin-block-start: 4px;
+  z-index: 30;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.address-suggest-row {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--text-strong, #1f2937);
+  cursor: pointer;
+  border-bottom: 1px solid var(--border-row, #f3f4f6);
+}
+.address-suggest-row:last-child { border-bottom: none; }
+.address-suggest-row:hover,
+.address-suggest-row:focus {
+  background: var(--primary-tint, #eef2ff);
+  outline: none;
+}
 </style>

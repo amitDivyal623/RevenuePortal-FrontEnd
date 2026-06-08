@@ -404,6 +404,16 @@ const pageNumbers = computed(() => {
 // The store owns the request itself (loading flags, error capture, state
 // updates). The view's job is to pass the current filter/page snapshot
 // and stamp lastUpdated when the call returns.
+// Shift a YYYY-MM-DD string forward by one day so the backend's __lte
+// comparison on a DateTimeField includes the full selected day, not just
+// up to midnight. e.g. user picks '2026-06-05' → we send '2026-06-06'.
+function shiftDateToEndOfDay(dateStr) {
+  if (!dateStr) return dateStr
+  const d = new Date(dateStr)
+  d.setDate(d.getDate() + 1)
+  return d.toISOString().slice(0, 10)
+}
+
 async function loadRows() {
   await casesStore.fetchCases({
     page:           currentPage.value,
@@ -418,7 +428,7 @@ async function loadRows() {
     addedBy:        applied.addedBy,
     contact:        applied.contact,
     dateFrom:       applied.dateFrom,
-    dateTo:         applied.dateTo,
+    dateTo:         shiftDateToEndOfDay(applied.dateTo),
     dateSearchBy:   applied.dateSearchBy,
     ordering:       ordering.value,
   })

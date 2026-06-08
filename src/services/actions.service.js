@@ -1,4 +1,4 @@
-import { api } from '@/services/api.js'
+import { api, apiDownload } from '@/services/api.js'
 
 // All HTTP calls for the /revp/actions/... endpoints. Actions are the
 // "what happens next on this case" rows from the legacy action tracker.
@@ -60,6 +60,19 @@ export const actionsService = {
   closeAndAction: (actionIds) =>
     api.post('/revp/actions/close-and-action/', { action_ids: actionIds }),
 
+  // Create a new action against a case.
+  // Required: case_id. Optional: title, holder, owner, action_status_id,
+  //           action_due_dt (ISO datetime), notes, instruction, action_template_id.
+  create: (payload) => api.post('/revp/actions/create/', payload),
+
+  // Partial update of an existing action.
+  // Allowed fields: title, description, holder, owner, action_status_id,
+  //                 action_closed, action_closed_dt, actioned_dt, notes, instruction.
+  update: (actionId, payload) => api.put(`/revp/actions/${actionId}/update/`, payload),
+
+  // Holder/Owner options for action modals — returns ACTION_ROLE lookup values.
+  modalOptions: () => api.get('/revp/actions/templates/modal-options/'),
+
   // Path string for the address-label PDF endpoint. Use with apiDownload
   // so the auth header is carried (browser nav strips it).
   printLabelPath: '/revp/actions/print-label/',
@@ -81,6 +94,13 @@ export const actionsService = {
   // Returns [{court_id, court_name, cases: [{case_id, case_num}], bookings: [...]}, ...]
   courtBookingOptions: (caseIds) =>
     api.get(`/revp/actions/court-booking-options/?case_ids=${encodeURIComponent(caseIds.join(','))}`),
+
+  // Export all actions for a case as CSV. Uses apiDownload so the Bearer
+  // token is carried; browser nav strips auth headers.
+  exportByCase: (caseId) => {
+    const params = new URLSearchParams({ case_id: caseId })
+    return apiDownload(`/revp/actions/export/?${params.toString()}`, `actions-${caseId}.csv`)
+  },
 
   // ASSIGN COURT BOOKINGS — write back court_booking_id per case.
   // Body: { assignments: [{ case_id, court_booking_id }, ...] }

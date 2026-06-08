@@ -31,7 +31,7 @@
           <label class="form-label">Owner</label>
           <select v-model="filterOwner">
             <option value="">Select</option>
-            <option v-for="o in holderOwnerOptions" :key="o.lookup_data_id" :value="o.lookup_data_id">{{ o.value }}</option>
+            <option v-for="o in holderOwnerOptions" :key="o.lookup_data_id" :value="o.lookup_data_id">{{ o.lookup_data_value }}</option>
           </select>
         </div>
 
@@ -50,7 +50,7 @@
           <label class="form-label">Holder</label>
           <select v-model="filterHolder">
             <option value="">Select</option>
-            <option v-for="o in holderOwnerOptions" :key="o.lookup_data_id" :value="o.lookup_data_id">{{ o.value }}</option>
+            <option v-for="o in holderOwnerOptions" :key="o.lookup_data_id" :value="o.lookup_data_id">{{ o.lookup_data_value }}</option>
           </select>
         </div>
 

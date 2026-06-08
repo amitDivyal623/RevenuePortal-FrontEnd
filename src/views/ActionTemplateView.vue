@@ -234,7 +234,7 @@
               <select id="m-holder" v-model="form.holder" :disabled="modalMode==='view'">
                 <option value="">Please Select</option>
                 <option v-for="r in holderOwnerOptions" :key="`h-${r.lookup_data_id}`" :value="r.lookup_data_id">
-                  {{ r.value }}
+                  {{ r.lookup_data_value }}
                 </option>
               </select>
               <span v-if="errors.holder" class="form-error">{{ errors.holder }}</span>
@@ -245,7 +245,7 @@
               <select id="m-owner" v-model="form.owner" :disabled="modalMode==='view'">
                 <option value="">Please Select</option>
                 <option v-for="r in holderOwnerOptions" :key="`o-${r.lookup_data_id}`" :value="r.lookup_data_id">
-                  {{ r.value }}
+                  {{ r.lookup_data_value }}
                 </option>
               </select>
               <span v-if="errors.owner" class="form-error">{{ errors.owner }}</span>
