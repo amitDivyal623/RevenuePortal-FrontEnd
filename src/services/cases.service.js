@@ -35,6 +35,9 @@ export const casesService = {
   // ── Audit / offences / notes ──────────────────────────────────────────────
   listAudit:    (id)               => api.get(`/revp/cases/${encodeURIComponent(id)}/audit/`),
   listOffences: (id)               => api.get(`/revp/cases/${encodeURIComponent(id)}/offences/`),
+  addOffence:   (id, payload)      => api.post(`/revp/cases/${encodeURIComponent(id)}/offences/add/`, payload),
+  removeOffence:(id, caseOffenceId) =>
+    api.delete(`/revp/cases/${encodeURIComponent(id)}/offences/${encodeURIComponent(caseOffenceId)}/remove/`),
   listNotes:    (id)               => api.get(`/revp/cases/${encodeURIComponent(id)}/notes/`),
   createNote:   (id, description)  =>
     api.post(`/revp/cases/${encodeURIComponent(id)}/notes/`, { description }),

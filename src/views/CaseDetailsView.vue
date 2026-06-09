@@ -637,16 +637,18 @@
                 <th>Offence</th>
                 <th>Charge</th>
                 <th>Statement</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
               <tr v-for="o in offences" :key="o.case_offence_id">
-                <td>{{ o.offence_id }}</td>
+                <td>{{ o.cjs_code ? `${o.cjs_code} - ${o.description}` : o.offence_id }}</td>
                 <td>{{ o.offence_charge || '—' }}</td>
                 <td>{{ o.case_offence_statement || '—' }}</td>
+                <td><button class="btn-action-red" @click="doRemoveOffence(o.case_offence_id)">REMOVE</button></td>
               </tr>
               <tr v-if="offences.length === 0">
-                <td colspan="3"><div class="empty-state"><p class="empty-state-desc">No data available in table</p></div></td>
+                <td colspan="4"><div class="empty-state"><p class="empty-state-desc">No data available in table</p></div></td>
               </tr>
             </tbody>
           </table>
@@ -666,13 +668,28 @@
               <legend>Court</legend>
               <div class="form-row-left">
                 <label class="form-label-left">Court</label>
-                <select :value="court.court" disabled class="field-readonly"><option>Please Select Court</option></select>
+                <select v-if="isEditMode" v-model="courtForm.court_id" class="field-editable" @change="onCourtChange(courtForm.court_id)">
+                  <option value="">Please Select Court</option>
+                  <option v-for="c in allCourts" :key="c.court_id" :value="c.court_id">{{ c.name }}</option>
+                </select>
+                <select v-else :value="court.court" disabled class="field-readonly">
+                  <option>{{ court.court || 'Please Select Court' }}</option>
+                </select>
 
                 <label class="form-label-left">Court Booking</label>
-                <select :value="court.courtBooking" disabled class="field-readonly"><option>Please Select Court Booking</option></select>
+                <select v-if="isEditMode" v-model="courtForm.court_booking_id" class="field-editable" :disabled="!courtForm.court_id || loadingCourtBookings" @change="onCourtBookingChange(courtForm.court_booking_id)">
+                  <option value="">{{ loadingCourtBookings ? 'Loading…' : 'Please Select Booking' }}</option>
+                  <option v-for="b in allCourtBookings" :key="b.court_booking_id" :value="b.court_booking_id">
+                    {{ fmtDateTime(b.start_dt) }} ({{ b.cases_assigned || 0 }}/{{ b.capacity }} cases)
+                  </option>
+                </select>
+                <select v-else :value="court.courtBooking" disabled class="field-readonly">
+                  <option>{{ court.courtBooking || 'Please Select Court Booking' }}</option>
+                </select>
 
                 <label class="form-label-left">Court Reference</label>
-                <input :value="court.courtReference" readonly class="field-readonly" />
+                <input v-if="isEditMode" v-model="courtForm.court_reference" maxlength="50" class="field-editable" />
+                <input v-else :value="court.courtReference" readonly class="field-readonly" />
               </div>
             </fieldset>
 
@@ -680,22 +697,46 @@
               <legend>Result</legend>
               <div class="form-row-left">
                 <label class="form-label-left">Court Result</label>
-                <select :value="court.courtResult" disabled class="field-readonly"><option>Please Select</option></select>
+                <select v-if="isEditMode" v-model="courtForm.court_result_id" class="field-editable">
+                  <option value="">Please Select</option>
+                  <option v-for="opt in courtResultOptions" :key="opt.lookup_data_id" :value="opt.lookup_data_id">{{ opt.lookup_data_value }}</option>
+                </select>
+                <select v-else :value="court.courtResult" disabled class="field-readonly">
+                  <option value="">Please Select</option>
+                  <option v-for="opt in courtResultOptions" :key="opt.lookup_data_id" :value="opt.lookup_data_value">{{ opt.lookup_data_value }}</option>
+                </select>
 
                 <label class="form-label-left">Costs</label>
-                <div class="input-currency"><span class="prefix">£</span><input :value="court.costs" readonly class="field-readonly" /></div>
+                <div class="input-currency">
+                  <span class="prefix">£</span>
+                  <input v-if="isEditMode" v-model="courtForm.court_costs" type="number" step="0.01" min="0" class="field-editable" />
+                  <input v-else :value="court.costs" readonly class="field-readonly" />
+                </div>
 
                 <label class="form-label-left">Compensation</label>
-                <div class="input-currency"><span class="prefix">£</span><input :value="court.compensation" readonly class="field-readonly" /></div>
+                <div class="input-currency">
+                  <span class="prefix">£</span>
+                  <input v-if="isEditMode" v-model="courtForm.court_restitution" type="number" step="0.01" min="0" class="field-editable" />
+                  <input v-else :value="court.compensation" readonly class="field-readonly" />
+                </div>
 
                 <label class="form-label-left">Fine</label>
-                <div class="input-currency"><span class="prefix">£</span><input :value="court.fine" readonly class="field-readonly" /></div>
+                <div class="input-currency">
+                  <span class="prefix">£</span>
+                  <input v-if="isEditMode" v-model="courtForm.court_fine" type="number" step="0.01" min="0" class="field-editable" />
+                  <input v-else :value="court.fine" readonly class="field-readonly" />
+                </div>
 
                 <label class="form-label-left">Victim</label>
-                <div class="input-currency"><span class="prefix">£</span><input :value="court.victim" readonly class="field-readonly" /></div>
+                <div class="input-currency">
+                  <span class="prefix">£</span>
+                  <input v-if="isEditMode" v-model="courtForm.victim_sur_charge" type="number" step="0.01" min="0" class="field-editable" />
+                  <input v-else :value="court.victim" readonly class="field-readonly" />
+                </div>
               </div>
               <div class="flex items-center gap-sm mt-md">
-                <input type="checkbox" :checked="court.preventRailPay" disabled />
+                <input v-if="isEditMode" type="checkbox" v-model="courtForm.prevent_rail_pay" />
+                <input v-else type="checkbox" :checked="court.preventRailPay" disabled />
                 <label class="text-sm">Prevent this case being paid through the RailPay Portal</label>
               </div>
             </fieldset>
@@ -705,23 +746,59 @@
             <fieldset class="legend-group">
               <legend>Settlement</legend>
               <div class="form-row-left">
-                <label class="form-label-left">Outstanding Fare</label>
-                <div class="input-currency"><span class="prefix">£</span><input :value="settlement.outstandingFare" readonly class="field-readonly" /></div>
+                <!-- PCN-only: three readonly charge fields replace Outstanding Fare + Admin Costs -->
+                <template v-if="isPcnCase">
+                  <label class="form-label-left">Parking Charge Notice</label>
+                  <div class="input-currency"><span class="prefix">£</span><input :value="settlement.parkingCharge" readonly class="field-readonly" /></div>
 
-                <label class="form-label-left">Administrative Costs</label>
-                <div class="flex items-center gap-sm">
-                  <div class="input-currency" style="flex:1"><span class="prefix">£</span><input :value="settlement.adminCosts" readonly class="field-readonly" /></div>
-                  <button class="btn-action-light" @click="overrideAdmin">OVERRIDE</button>
-                </div>
+                  <label class="form-label-left">Notice to Owner</label>
+                  <div class="input-currency"><span class="prefix">£</span><input :value="settlement.noticeToOwner" readonly class="field-readonly" /></div>
+
+                  <label class="form-label-left">Charge Certificate</label>
+                  <div class="input-currency"><span class="prefix">£</span><input :value="settlement.chargeCertificate" readonly class="field-readonly" /></div>
+                </template>
+
+                <!-- Non-PCN: Outstanding Fare (editable) + Administrative Costs (override) -->
+                <template v-else>
+                  <label class="form-label-left">Outstanding Fare</label>
+                  <div class="input-currency">
+                    <span class="prefix">£</span>
+                    <input v-if="isEditMode" v-model="courtForm.outstanding_fare" type="number" step="0.01" min="0" class="field-editable" />
+                    <input v-else :value="settlement.outstandingFare" readonly class="field-readonly" />
+                  </div>
+
+                  <label class="form-label-left">Administrative Costs</label>
+                  <div class="flex items-center gap-sm">
+                    <div class="input-currency" style="flex:1">
+                      <span class="prefix">£</span>
+                      <input v-if="adminOverrideMode" v-model="adminOverrideCost" type="number" step="0.01" min="0" class="field-editable" />
+                      <input v-else :value="settlement.adminCosts" readonly class="field-readonly" />
+                    </div>
+                    <span v-if="court.isAdminOverride && !adminOverrideMode" class="badge-override">OVERRIDDEN</span>
+                    <template v-if="adminOverrideMode">
+                      <button class="btn-action-green" @click="saveAdminOverride" :disabled="savingOverride">{{ savingOverride ? 'Saving…' : 'SAVE' }}</button>
+                      <button class="btn-action-light" @click="cancelAdminOverride">CANCEL</button>
+                    </template>
+                    <button v-else class="btn-action-light" @click="overrideAdmin">OVERRIDE</button>
+                  </div>
+                </template>
 
                 <label class="form-label-left" style="font-weight:700">Automatic Dues</label>
                 <div class="input-currency"><span class="prefix">£</span><input :value="settlement.automaticDues" readonly class="field-readonly" /></div>
 
                 <label class="form-label-left">Manual Settlements</label>
-                <div class="input-currency"><span class="prefix">£</span><input :value="settlement.manualSettlements" readonly class="field-readonly" /></div>
+                <div class="input-currency">
+                  <span class="prefix">£</span>
+                  <input v-if="isEditMode" v-model="courtForm.manual_settlement" type="number" step="0.01" min="0" class="field-editable" @input="courtForm.oocs_amount = ''" />
+                  <input v-else :value="settlement.manualSettlements" readonly class="field-readonly" />
+                </div>
 
                 <label class="form-label-left">OOCS Amount</label>
-                <div class="input-currency"><span class="prefix">£</span><input :value="settlement.oocsAmount" readonly class="field-readonly" /></div>
+                <div class="input-currency">
+                  <span class="prefix">£</span>
+                  <input v-if="isEditMode" v-model="courtForm.oocs_amount" type="number" step="0.01" min="0" class="field-editable" @input="courtForm.manual_settlement = ''" />
+                  <input v-else :value="settlement.oocsAmount" readonly class="field-readonly" />
+                </div>
 
                 <label class="form-label-left" style="font-weight:700">Manual Dues</label>
                 <div class="input-currency"><span class="prefix">£</span><input :value="settlement.manualDues" readonly class="field-readonly" /></div>
@@ -733,7 +810,8 @@
 
             <fieldset class="legend-group mt-lg">
               <legend>Notes</legend>
-              <textarea :value="settlement.notes" readonly rows="5" class="field-readonly"></textarea>
+              <textarea v-if="isEditMode" v-model="courtForm.court_notes" rows="5" class="field-editable"></textarea>
+              <textarea v-else :value="settlement.notes" readonly rows="5" class="field-readonly"></textarea>
             </fieldset>
           </div>
         </div>
@@ -1365,6 +1443,87 @@
       </div>
     </div>
 
+    <!-- Add Offence modal — opens from Offences tab ADD button. Writes one
+         revp_case_offence row + one revp_audit_history row in a single backend
+         transaction (mirrors legacy setOffenceDetailsByCaseid fuseaction).
+         Offence dropdown populates charge + statement on selection. -->
+    <div v-if="offenceModalOpen" class="modal-backdrop">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="offence-modal-title"
+           style="max-width:560px;width:92%;">
+        <div class="modal-head">
+          <h2 id="offence-modal-title" class="modal-title">Add Offence</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="offenceModalOpen = false">×</button>
+        </div>
+        <div class="modal-body" style="padding:16px 20px;">
+          <div style="margin-bottom:14px;">
+            <label class="form-label-left" style="display:block;margin-bottom:6px;">Offence</label>
+            <div style="position:relative;">
+              <input
+                v-model="offenceSearch"
+                @focus="offenceDropdownOpen = true"
+                @input="onOffenceSearchInput"
+                @blur="offenceDropdownOpen = false"
+                autocomplete="off"
+                placeholder="Search by CJS code or description…"
+                style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;box-sizing:border-box;"
+              />
+              <div
+                v-if="offenceDropdownOpen"
+                style="position:absolute;top:calc(100% + 2px);left:0;right:0;z-index:20;background:#fff;border:1px solid #d1d5db;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.1);max-height:220px;overflow-y:auto;"
+              >
+                <div
+                  v-for="o in filteredOffences"
+                  :key="o.offence_id"
+                  @mousedown.prevent="pickOffence(o)"
+                  style="padding:8px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid #f3f4f6;"
+                  :style="o.offence_id === offenceModalForm.offence_id ? 'background:#eff6ff;' : ''"
+                >
+                  <span style="font-weight:600;color:#1e40af;">{{ o.cjs_code }}</span>
+                  <span style="color:#374151;"> — {{ o.description }}</span>
+                </div>
+                <div
+                  v-if="filteredOffences.length === 0"
+                  style="padding:10px 12px;font-size:13px;color:#9ca3af;text-align:center;"
+                >
+                  No offences found
+                </div>
+              </div>
+            </div>
+            <p v-if="offenceModalForm.offence_id" style="font-size:11px;color:#16a34a;margin-top:4px;">
+              Selected: {{ offenceSearch }}
+            </p>
+          </div>
+          <div style="margin-bottom:14px;">
+            <label class="form-label-left" style="display:block;margin-bottom:6px;">Charge</label>
+            <input
+              v-model="offenceModalForm.offence_charge"
+              style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;"
+              placeholder="Charge"
+            />
+          </div>
+          <div>
+            <label class="form-label-left" style="display:block;margin-bottom:6px;">Statement</label>
+            <textarea
+              v-model="offenceModalForm.case_offence_statement"
+              rows="4"
+              maxlength="50"
+              style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-family:inherit;font-size:13px;"
+              placeholder="Statement of facts…"
+            ></textarea>
+          </div>
+          <p v-if="offenceModalError" class="form-error" role="alert" style="color:#b91c1c;font-size:12px;margin-top:6px;">
+            {{ offenceModalError }}
+          </p>
+        </div>
+        <div class="modal-foot" style="padding:12px 20px;display:flex;justify-content:flex-end;gap:8px;">
+          <button type="button" class="btn-action-red"   @click="offenceModalOpen = false" :disabled="offenceModalSaving">CANCEL</button>
+          <button type="button" class="btn-action-green" @click="submitOffence"            :disabled="offenceModalSaving">
+            {{ offenceModalSaving ? 'SAVING…' : 'ADD' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Add Note modal — opens from Notes tab ADD button. Writes one
          revp_note row + one revp_audit_history row in a single backend
          transaction (mirrors legacy setNotesDetailsByCaseid). -->
@@ -1433,11 +1592,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ref, reactive, computed, watch, watchEffect, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Swal from 'sweetalert2'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { casesService }     from '@/services/cases.service.js'
+import { offencesService }  from '@/services/offences.service.js'
 import { customersService } from '@/services/customers.service.js'
 import { lookupService }    from '@/services/lookup.service.js'
 import { api }              from '@/services/api.js'
@@ -1473,6 +1633,19 @@ const editForm = reactive({
 })
 const savingEdit = ref(false)
 
+// Mirror old project: auto-tick the RailPay prevent checkbox when the case
+// status is changed to Closed or a paid/payment status — matches the two
+// hardcoded status IDs in the old project's JS handlers.
+watch(() => editForm.case_status_id, (newId) => {
+  if (!newId || !isEditMode.value) return
+  const status = statusOptions.value.find(s => s.case_status_id === newId)
+  if (!status) return
+  const desc = (status.status_desc || '').toLowerCase()
+  if (desc.includes('closed') || desc.includes('paid') || desc.includes('ap payment')) {
+    courtForm.prevent_rail_pay = true
+  }
+})
+
 // Status dropdown options for the in-place edit. Fetched once when the
 // operator enters edit mode for the first time; cached after that.
 const statusOptions = ref([])
@@ -1507,6 +1680,21 @@ async function enterEditMode() {
     ensureQuestionAtOptions()
     _ensureRailCardTypeOptions()
   }
+  // Snapshot court/settlement fields from the raw case row.
+  const r = _caseRow.value || {}
+  courtForm.court_id          = r.court_id          || ''
+  courtForm.court_booking_id  = r.court_booking_id  || ''
+  courtForm.court_reference   = r.court_reference   || ''
+  courtForm.court_result_id   = r.court_result_id   || ''
+  courtForm.court_costs       = r.court_costs       != null ? r.court_costs       : ''
+  courtForm.court_restitution = r.court_restitution != null ? r.court_restitution : ''
+  courtForm.court_fine        = r.court_fine        != null ? r.court_fine        : ''
+  courtForm.victim_sur_charge = r.victim_sur_charge != null ? r.victim_sur_charge : ''
+  courtForm.court_notes       = r.court_notes       || ''
+  courtForm.outstanding_fare  = r.outstanding_fare  != null ? r.outstanding_fare  : ''
+  courtForm.manual_settlement = r.manual_settlement != null ? r.manual_settlement : ''
+  courtForm.oocs_amount       = r.oocs_amount       != null ? r.oocs_amount       : ''
+  courtForm.prevent_rail_pay  = r.from_app_or_ap === '1'
   // Load dropdown options BEFORE populating the form so v-model on <select>
   // finds a matching option the moment the value is set.
   await Promise.all([
@@ -1515,6 +1703,8 @@ async function enterEditMode() {
     _ensureVerificationOptions(),
     _ensureReasonOptions(),
     isPcnCase.value && hasVehicle.value ? _ensurePcnOptions() : Promise.resolve(),
+    _ensureCourtOptions(),
+    courtForm.court_id ? _loadCourtBookings(courtForm.court_id) : Promise.resolve(),
   ])
   _populateCustomerForm()
   if (isPcnCase.value && hasVehicle.value) _populateVehicleForm()
@@ -1530,12 +1720,27 @@ async function saveEdit() {
   savingEdit.value = true
   loadError.value = ''
   try {
-    // 1. Header card — case-level fields.
+    // 1. Header card — case-level fields (merged with court fields: all on revp_case).
     const headerPayload = {}
     if (editForm.case_dt)        headerPayload.case_dt        = editForm.case_dt
     if (editForm.case_status_id) headerPayload.case_status_id = editForm.case_status_id
     headerPayload.closure_reason = editForm.closure_reason || ''
     headerPayload.closure_dt     = editForm.closure_dt || ''
+
+    // Court / Summons Details — all stored on revp_case.
+    headerPayload.court_id          = courtForm.court_id         || null
+    headerPayload.court_booking_id  = courtForm.court_booking_id || null
+    headerPayload.court_reference   = courtForm.court_reference  || null
+    headerPayload.court_result_id   = courtForm.court_result_id  || null
+    headerPayload.court_notes       = courtForm.court_notes      || null
+    headerPayload.court_costs       = courtForm.court_costs       !== '' ? Number(courtForm.court_costs)       : 0
+    headerPayload.court_restitution = courtForm.court_restitution !== '' ? Number(courtForm.court_restitution) : 0
+    headerPayload.court_fine        = courtForm.court_fine        !== '' ? Number(courtForm.court_fine)        : 0
+    headerPayload.victim_sur_charge = courtForm.victim_sur_charge !== '' ? Number(courtForm.victim_sur_charge) : 0
+    headerPayload.outstanding_fare  = courtForm.outstanding_fare  !== '' ? Number(courtForm.outstanding_fare)  : 0
+    headerPayload.manual_settlement = courtForm.manual_settlement !== '' ? Number(courtForm.manual_settlement) : 0
+    headerPayload.oocs_amount       = courtForm.oocs_amount       !== '' ? Number(courtForm.oocs_amount)       : 0
+    headerPayload.from_app_or_ap    = courtForm.prevent_rail_pay ? '1' : '0'
 
     // 2. Signature flags also live on revp_case — merge into the same PUT.
     const sig = SIGNATURE_OPTIONS.find(s => s.value === customerForm.customer_signature)
@@ -1716,9 +1921,28 @@ async function saveEdit() {
 // the old name can find the new location: see saveEdit() above.
 
 function cancelEdit() {
-  // caseDetails wasn't touched (editForm was the only buffer) so just
-  // flip back to view mode.
   isEditMode.value = false
+  // Restore settlement display fields from the last saved row so that any
+  // in-progress edits don't leak into view mode after cancel.
+  const r = _caseRow.value || {}
+  const _admin  = Number(r.admin_cost || 0)
+  const _fare   = Number(r.outstanding_fare || 0)
+  const _manual = Number(r.manual_settlement || 0)
+  const _oocs   = Number(r.oocs_amount || 0)
+  settlement.outstandingFare   = r.outstanding_fare   != null ? Number(r.outstanding_fare).toFixed(2)   : ''
+  settlement.adminCosts        = r.admin_cost         != null ? Number(r.admin_cost).toFixed(2)         : ''
+  settlement.manualSettlements = r.manual_settlement  != null ? Number(r.manual_settlement).toFixed(2)  : ''
+  settlement.oocsAmount        = r.oocs_amount        != null ? Number(r.oocs_amount).toFixed(2)        : ''
+  settlement.totalAdminCost    = r.total_admin_cost   != null ? Number(r.total_admin_cost).toFixed(2)   : ''
+  if (isPcnCase.value) {
+    const _pcn  = Number(r.parking_charge_notice  || 0)
+    const _note = Number(r.pcn_notice_to_owner    || 0)
+    const _cert = Number(r.pcn_charge_certificate || 0)
+    settlement.automaticDues = Math.max(_pcn, _note, _cert).toFixed(2)
+  } else {
+    settlement.automaticDues = (_admin + _fare).toFixed(2)
+  }
+  settlement.manualDues = _manual > 0 ? _manual.toFixed(2) : _oocs > 0 ? _oocs.toFixed(2) : ''
 }
 
 // Holds the raw case row from the last successful GET — used by
@@ -2019,6 +2243,46 @@ async function _ensureReasonOptions() {
   try { reasonForIssueOptions.value = await lookupService.listByType('CASE_REASON_FOR_ISSUE'); _reasonOptionsLoaded = true } catch { /* use empty */ }
 }
 
+// Court dropdown helpers — courts list cached for the session; bookings
+// reloaded each time the court selection changes.
+async function _ensureCourtOptions() {
+  if (allCourts.value.length) return
+  try {
+    const res = await courtsService.getAll({ page: 1, page_size: 100, active: 1 })
+    allCourts.value = res.results || []
+  } catch { /* leave empty */ }
+}
+
+async function _loadCourtBookings(courtId) {
+  allCourtBookings.value = []
+  if (!courtId) return
+  loadingCourtBookings.value = true
+  try {
+    const res = await courtsService.listBookings({ court_id: courtId, page: 1, page_size: 100 })
+    allCourtBookings.value = res.results || []
+  } catch { /* leave empty */ }
+  loadingCourtBookings.value = false
+}
+
+async function onCourtChange(courtId) {
+  courtForm.court_booking_id = ''
+  await _loadCourtBookings(courtId)
+
+  // Mirror old project: court selected → "Court Queue"; court cleared → "Open"
+  await ensureStatusOptions()
+  const targetDesc = courtId ? 'Court Queue' : 'Open'
+  const match = statusOptions.value.find(s => s.status_desc === targetDesc)
+  if (match) editForm.case_status_id = match.case_status_id
+}
+
+async function onCourtBookingChange(bookingId) {
+  // Mirror old project: booking selected → "Court Booked"; booking cleared → "Court Queue"
+  await ensureStatusOptions()
+  const targetDesc = bookingId ? 'Court Booked' : 'Court Queue'
+  const match = statusOptions.value.find(s => s.status_desc === targetDesc)
+  if (match) editForm.case_status_id = match.case_status_id
+}
+
 // PCN car park dropdown options — issue reasons and car park locations,
 // loaded lazily the first time a PCN case enters edit mode.
 const pcnIssueReasonOptions  = ref([])
@@ -2251,6 +2515,46 @@ async function loadCase() {
     else if (c.unable_to_sign) customer.customerSignature = 'Unable to sign'
     else customer.customerSignature = 'Signature provided'
 
+    // Court + settlement fields all live on the case row — populate directly.
+    court.courtReference   = c.court_reference || ''
+    court.costs            = c.court_costs       ? Number(c.court_costs).toFixed(2)       : ''
+    court.compensation     = c.court_restitution ? Number(c.court_restitution).toFixed(2) : ''
+    court.fine             = c.court_fine        ? Number(c.court_fine).toFixed(2)        : ''
+    court.victim           = c.victim_sur_charge ? Number(c.victim_sur_charge).toFixed(2) : ''
+    court.preventRailPay   = c.from_app_or_ap === '1'
+    court.isAdminOverride  = c.is_admin_override === 1
+    settlement.outstandingFare   = c.outstanding_fare   ? Number(c.outstanding_fare).toFixed(2)  : ''
+    settlement.adminCosts        = c.admin_cost         ? Number(c.admin_cost).toFixed(2)         : ''
+    settlement.manualSettlements = c.manual_settlement  ? Number(c.manual_settlement).toFixed(2)  : ''
+    settlement.oocsAmount        = c.oocs_amount        ? Number(c.oocs_amount).toFixed(2)        : ''
+    settlement.totalAdminCost    = c.total_admin_cost   != null ? Number(c.total_admin_cost).toFixed(2) : ''
+    settlement.notes             = c.court_notes || ''
+    // PCN-only readonly fields
+    settlement.parkingCharge     = c.parking_charge_notice  != null ? Number(c.parking_charge_notice).toFixed(2)  : ''
+    settlement.noticeToOwner     = c.pcn_notice_to_owner    != null ? Number(c.pcn_notice_to_owner).toFixed(2)    : ''
+    settlement.chargeCertificate = c.pcn_charge_certificate != null ? Number(c.pcn_charge_certificate).toFixed(2) : ''
+    const _admin = Number(c.admin_cost || 0)
+    const _fare  = Number(c.outstanding_fare || 0)
+    // Automatic Dues: PCN = MAX(parkingCharge, noticeToOwner, chargeCert); non-PCN = admin + fare
+    if (isPcnCase.value) {
+      const _pcn  = Number(c.parking_charge_notice  || 0)
+      const _note = Number(c.pcn_notice_to_owner    || 0)
+      const _cert = Number(c.pcn_charge_certificate || 0)
+      settlement.automaticDues = Math.max(_pcn, _note, _cert).toFixed(2)
+    } else {
+      settlement.automaticDues = (_admin + _fare).toFixed(2)
+    }
+    // Manual Dues = manual_settlement or oocs_amount (no admin — mirrors old project keyup handler)
+    const _manual = Number(c.manual_settlement || 0)
+    const _oocs   = Number(c.oocs_amount || 0)
+    if (_manual > 0) {
+      settlement.manualDues = _manual.toFixed(2)
+    } else if (_oocs > 0) {
+      settlement.manualDues = _oocs.toFixed(2)
+    } else {
+      settlement.manualDues = ''
+    }
+
     // Hydrate all related records in parallel — none blocks the others and
     // a failure on one leaves the rest of the page usable. Tabs whose
     // backend already exists (audit / offences / actions / court / payment)
@@ -2259,7 +2563,7 @@ async function loadCase() {
     const [
       custResult, jrnResult, descResult, verResult,
       auditResult, offResult, actsResult, courtResult, bookingResult, payResult,
-      notesResult, linkedResult, attResult, vehResult,
+      notesResult, linkedResult, attResult, vehResult, courtResResult,
     ] = await Promise.allSettled([
       c.customer_id ? customersService.get(c.customer_id)            : Promise.resolve(null),
       c.journey_id  ? journeyService.get(c.journey_id)              : Promise.resolve(null),
@@ -2275,6 +2579,7 @@ async function loadCase() {
       casesService.listLinked(c.case_id),
       casesService.listAttachments(c.case_id),
       c.vehicle_id  ? vehiclesService.get(c.vehicle_id)              : Promise.resolve(null),
+      courtsService.listCourtResults(),
     ])
 
     // Description + verification are optional sub-records — a 404 just
@@ -2349,11 +2654,17 @@ async function loadCase() {
       }))
     }
     if (courtResult.status === 'fulfilled' && courtResult.value) {
-      court.court           = courtResult.value.name || ''
-      court.courtReference  = courtResult.value.court_reference || ''
+      court.court = courtResult.value.name || ''
     }
     if (bookingResult.status === 'fulfilled' && bookingResult.value) {
       court.courtBooking = `${bookingResult.value.court_name || ''} — ${fmtDateTime(bookingResult.value.start_dt)}`.trim()
+    }
+    if (courtResResult.status === 'fulfilled' && Array.isArray(courtResResult.value)) {
+      courtResultOptions.value = courtResResult.value
+      if (c.court_result_id) {
+        const match = courtResultOptions.value.find(o => o.lookup_data_id === c.court_result_id)
+        court.courtResult = match ? match.lookup_data_value : ''
+      }
     }
     if (payResult.status === 'fulfilled' && payResult.value) {
       const rows = payResult.value.results ?? payResult.value ?? []
@@ -2544,12 +2855,72 @@ const court = reactive({
   court: '', courtBooking: '', courtReference: '',
   courtResult: '', costs: '', compensation: '', fine: '', victim: '',
   preventRailPay: false,
+  isAdminOverride: false,
+})
+const courtResultOptions    = ref([])
+const allCourts             = ref([])
+const allCourtBookings      = ref([])
+const loadingCourtBookings  = ref(false)
+
+// Admin-cost override state — mirrors old project's OVERRIDE button flow.
+const adminOverrideMode  = ref(false)   // true while the admin_cost input is editable
+const adminOverrideCost  = ref('')      // local edit buffer for override value
+const savingOverride     = ref(false)
+
+const courtForm = reactive({
+  court_id:          '',
+  court_booking_id:  '',
+  court_reference:   '',
+  court_result_id:   '',
+  court_costs:       '',
+  court_restitution: '',
+  court_fine:        '',
+  victim_sur_charge: '',
+  court_notes:       '',
+  outstanding_fare:  '',
+  manual_settlement: '',
+  oocs_amount:       '',
+  prevent_rail_pay:  false,
 })
 
 const settlement = reactive({
   outstandingFare: '', adminCosts: '', automaticDues: '',
   manualSettlements: '', oocsAmount: '', manualDues: '',
   totalAdminCost: '', notes: '',
+  parkingCharge: '', noticeToOwner: '', chargeCertificate: '',   // PCN-only
+})
+
+// Live-recalculate derived settlement fields while in edit mode so the user
+// sees updated totals as they type — no save/tab-switch needed.
+watchEffect(() => {
+  if (!isEditMode.value) return
+  const admin  = Number(settlement.adminCosts || 0)
+  const fare   = Number(courtForm.outstanding_fare || 0)
+  const manual = Number(courtForm.manual_settlement || 0)
+  const oocs   = Number(courtForm.oocs_amount || 0)
+
+  if (isPcnCase.value) {
+    // PCN: automatic_dues = MAX(parkingCharge, noticeToOwner, chargeCertificate)
+    const pcn  = Number(settlement.parkingCharge    || 0)
+    const note = Number(settlement.noticeToOwner    || 0)
+    const cert = Number(settlement.chargeCertificate || 0)
+    settlement.automaticDues = Math.max(pcn, note, cert).toFixed(2)
+  } else {
+    settlement.automaticDues = (admin + fare).toFixed(2)
+  }
+
+  if (manual > 0) {
+    settlement.manualDues = manual.toFixed(2)
+  } else if (oocs > 0) {
+    settlement.manualDues = oocs.toFixed(2)
+  } else {
+    settlement.manualDues = ''
+  }
+
+  let total = admin
+  if (manual > 0) total += manual
+  else if (oocs > 0) total += oocs
+  settlement.totalAdminCost = total.toFixed(2)
 })
 
 const payment = reactive({
@@ -2672,6 +3043,25 @@ function toggleAttachment(id) {
 
 const auditLog = ref([])
 const linkedCases = ref([])
+
+// Add-Offence modal state — triggered from the Offences tab ADD button.
+// allOffences is loaded once on first open and reused on subsequent opens.
+const offenceModalOpen    = ref(false)
+const offenceModalSaving  = ref(false)
+const offenceModalError   = ref('')
+const offenceModalForm    = reactive({ offence_id: '', offence_charge: '', case_offence_statement: '' })
+const allOffences         = ref([])
+const offenceSearch       = ref('')
+const offenceDropdownOpen = ref(false)
+
+const filteredOffences = computed(() => {
+  const q = (offenceSearch.value || '').trim().toLowerCase()
+  if (!q) return allOffences.value
+  return allOffences.value.filter(o =>
+    (o.cjs_code || '').toLowerCase().includes(q) ||
+    (o.description || '').toLowerCase().includes(q)
+  )
+})
 
 // Add-Note modal state — small inline modal triggered from the Notes tab.
 const noteModalOpen = ref(false)
@@ -3061,8 +3451,183 @@ watch(addressSuggestions, (rows) => {
   }
 })
 
-function addOffence()                { /* TODO */ }
-function overrideAdmin()             { /* TODO */ }
+async function addOffence() {
+  offenceModalForm.offence_id            = ''
+  offenceModalForm.offence_charge        = ''
+  offenceModalForm.case_offence_statement = ''
+  offenceModalError.value   = ''
+  offenceModalSaving.value  = false
+  offenceSearch.value       = ''
+  offenceDropdownOpen.value = false
+  // Load once; sort by CJS code for consistent display order
+  if (!allOffences.value.length) {
+    try {
+      const data = await offencesService.getAll()
+      allOffences.value = data.slice().sort((a, b) =>
+        (a.cjs_code || '').localeCompare(b.cjs_code || ''))
+    } catch { allOffences.value = [] }
+  }
+  offenceModalOpen.value = true
+}
+
+function pickOffence(offence) {
+  offenceSearch.value = offence.cjs_code
+    ? `${offence.cjs_code} — ${offence.description}`
+    : (offence.description || '')
+  offenceDropdownOpen.value   = false
+  offenceModalForm.offence_id = offence.offence_id
+  onOffenceModalSelect(offence.offence_id)
+}
+
+function onOffenceSearchInput() {
+  offenceDropdownOpen.value   = true
+  // Clear the selection so submit doesn't use a stale offence_id
+  offenceModalForm.offence_id             = ''
+  offenceModalForm.offence_charge         = ''
+  offenceModalForm.case_offence_statement = ''
+}
+
+async function onOffenceModalSelect(offenceId) {
+  const offence = allOffences.value.find(o => o.offence_id === offenceId)
+  if (!offence) return
+  offenceModalForm.offence_charge = offence.charge || ''
+  // Fetch full detail for the offence_statement (deferred in the list response)
+  try {
+    const detail = await offencesService.getOne(offenceId)
+    offenceModalForm.case_offence_statement = (detail.offence_statement || '').slice(0, 50)
+  } catch {
+    offenceModalForm.case_offence_statement = ''
+  }
+}
+
+async function submitOffence() {
+  if (!offenceModalForm.offence_id) {
+    offenceModalError.value = 'Please select an offence.'
+    return
+  }
+  offenceModalSaving.value = true
+  offenceModalError.value  = ''
+  try {
+    const caseId = String(route.params.caseid)
+    const payload = { offence_id: offenceModalForm.offence_id }
+    if (offenceModalForm.offence_charge)        payload.offence_charge        = offenceModalForm.offence_charge
+    if (offenceModalForm.case_offence_statement) payload.case_offence_statement = offenceModalForm.case_offence_statement
+    const created = await casesService.addOffence(caseId, payload)
+    // Merge cjs_code / description from the already-loaded offence list
+    const offence = allOffences.value.find(o => o.offence_id === created.offence_id)
+    const label = offence?.cjs_code
+      ? `${offence.cjs_code} — ${offence.description}`
+      : (offence?.description ?? 'Offence')
+    offences.value.push({
+      ...created,
+      cjs_code:    offence?.cjs_code    ?? null,
+      description: offence?.description ?? null,
+    })
+    offenceModalOpen.value = false
+    await Swal.fire({
+      icon:              'success',
+      title:             'Offence Added',
+      text:              `"${label}" has been added to this case.`,
+      timer:             2000,
+      showConfirmButton: false,
+    })
+  } catch (err) {
+    offenceModalError.value = err?.data?.detail || err?.message || 'Failed to add offence.'
+  } finally {
+    offenceModalSaving.value = false
+  }
+}
+
+async function doRemoveOffence(caseOffenceId) {
+  const target = offences.value.find(o => o.case_offence_id === caseOffenceId)
+  const label  = target?.cjs_code
+    ? `${target.cjs_code} — ${target.description}`
+    : (target?.offence_id ?? 'this offence')
+
+  const { isConfirmed } = await Swal.fire({
+    icon:               'warning',
+    title:              'Remove Offence?',
+    text:               `Remove "${label}" from this case? This cannot be undone.`,
+    showCancelButton:   true,
+    confirmButtonText:  'Yes, remove',
+    cancelButtonText:   'Cancel',
+    confirmButtonColor: '#dc2626',
+  })
+  if (!isConfirmed) return
+
+  try {
+    await casesService.removeOffence(String(route.params.caseid), caseOffenceId)
+    offences.value = offences.value.filter(o => o.case_offence_id !== caseOffenceId)
+    await Swal.fire({
+      icon:              'success',
+      title:             'Offence Removed',
+      text:              `"${label}" has been removed from this case.`,
+      timer:             2000,
+      showConfirmButton: false,
+    })
+  } catch (err) {
+    await Swal.fire({ icon: 'error', title: 'Error', text: err?.data?.detail || 'Failed to remove offence.' })
+  }
+}
+function overrideAdmin() {
+  // Enter override mode: seed the edit buffer with the current admin cost
+  // and make the input editable — mirrors old project's OVERRIDE button.
+  adminOverrideCost.value = settlement.adminCosts
+  adminOverrideMode.value = true
+}
+
+function cancelAdminOverride() {
+  adminOverrideMode.value = false
+  adminOverrideCost.value = ''
+}
+
+async function saveAdminOverride() {
+  const newCost = adminOverrideCost.value !== '' ? Number(adminOverrideCost.value) : 0
+  savingOverride.value = true
+  try {
+    const updated = await casesService.update(route.params.caseid, {
+      admin_cost:       newCost,
+      is_admin_override: 1,
+    })
+    // Refresh displayed values from the server response (recalculation happened server-side).
+    settlement.adminCosts     = updated.admin_cost     != null ? Number(updated.admin_cost).toFixed(2)     : ''
+    settlement.totalAdminCost = updated.total_admin_cost != null ? Number(updated.total_admin_cost).toFixed(2) : ''
+    // Recompute client-side derived fields from the fresh response values.
+    const _admin  = Number(updated.admin_cost || 0)
+    const _fare   = Number(updated.outstanding_fare || 0)
+    const _manual = Number(updated.manual_settlement || 0)
+    const _oocs   = Number(updated.oocs_amount || 0)
+    if (isPcnCase.value) {
+      const _pcn  = Number(updated.parking_charge_notice  || 0)
+      const _note = Number(updated.pcn_notice_to_owner    || 0)
+      const _cert = Number(updated.pcn_charge_certificate || 0)
+      settlement.automaticDues = Math.max(_pcn, _note, _cert).toFixed(2)
+    } else {
+      settlement.automaticDues = (_admin + _fare).toFixed(2)
+    }
+    if (_manual > 0) {
+      settlement.manualDues = _manual.toFixed(2)
+    } else if (_oocs > 0) {
+      settlement.manualDues = _oocs.toFixed(2)
+    } else {
+      settlement.manualDues = ''
+    }
+    court.isAdminOverride = true
+    // Keep _caseRow in sync so re-entering edit mode sees the latest values.
+    if (_caseRow.value) {
+      _caseRow.value.admin_cost      = updated.admin_cost
+      _caseRow.value.is_admin_override = updated.is_admin_override
+      _caseRow.value.total_admin_cost  = updated.total_admin_cost
+      _caseRow.value.amount_due        = updated.amount_due
+    }
+    adminOverrideMode.value = false
+    adminOverrideCost.value = ''
+  } catch (err) {
+    await Swal.fire({ icon: 'error', title: 'Override Failed', text: err?.data?.detail || 'Could not save admin cost override.' })
+  } finally {
+    savingOverride.value = false
+  }
+}
 function registerPayment()           { /* TODO */ }
 function deletePayment()             { /* TODO */ }
 function startAppeal()               { /* TODO */ }
@@ -3203,6 +3768,18 @@ async function confirmLink() {
 </script>
 
 <style scoped>
+.badge-override {
+  display: inline-block;
+  padding: 2px 7px;
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffc107;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
 .card-section-head {
   display: flex;
   align-items: center;
