@@ -118,6 +118,37 @@ export async function apiDownloadPost(path, body, filename) {
   URL.revokeObjectURL(url)
 }
 
+// POST a JSON body and return the response as a Blob. Lets the caller
+// decide between opening in a new tab (VIEW SELECTED) or triggering a
+// download (PRINT SELECTED). The response is treated as binary regardless
+// of Content-Type — useful for inline-PDF responses where we don't want
+// the request() helper to JSON.parse() the bytes.
+export async function apiPostBlob(path, body) {
+  const auth = await loadAuth()
+  const token = auth?.accessToken ?? null
+  const headers = { 'Content-Type': 'application/json' }
+  if (token) headers.Authorization = `Bearer ${token}`
+  const resp = await fetch(`${BASE}${path}`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(body),
+  })
+  if (!resp.ok) {
+    let detail = null
+    try { detail = await resp.json() } catch {}
+    throw new ApiError({ status: resp.status, data: detail })
+  }
+  // Pull any soft-failures the backend flagged via X-Render-Failed so the
+  // caller can surface them without breaking the PDF.
+  const failedHeader = resp.headers.get('X-Render-Failed')
+  let failed = null
+  if (failedHeader) {
+    try { failed = JSON.parse(failedHeader) } catch { failed = failedHeader }
+  }
+  const blob = await resp.blob()
+  return { blob, failed }
+}
+
 export const apiPostPublic = (path, body, opts = {}) =>
   request(path, { ...opts, method: 'POST', body: JSON.stringify(body) }, { skipAuth: true })
 

@@ -368,12 +368,87 @@ function caseStatusColor(s) {
   return map[s] ?? 'neutral'
 }
 
-function printSelected() {
-  // Phase 4B — docxtpl + LibreOffice render pipeline. Stubbed for now.
-  window.alert('PRINT SELECTED is queued for Phase 4B (PDF rendering pipeline).')
+// ── Render-selected helpers ────────────────────────────────────────────
+// Both buttons hit the same backend endpoint (/printqueue/view-merged/)
+// which returns a single merged PDF. The frontend decides what to do with
+// the Blob:
+//   VIEW SELECTED  → open in a new tab (browser inline-renders the PDF)
+//   PRINT SELECTED → trigger a download (operator opens it and prints)
+async function _renderSelected() {
+  const ids = selectedRows.value.slice()
+  if (ids.length === 0) {
+    window.alert('Select at least one letter first.')
+    return null
+  }
+  try {
+    const { blob, failed } = await printQueueService.viewMerged(ids)
+    if (failed && Array.isArray(failed) && failed.length) {
+      console.warn('[print-queue] some letters failed to render:', failed)
+    }
+    return { blob, failed }
+  } catch (e) {
+    console.error('[print-queue] render failed', e)
+    const detail = e?.data?.detail || e?.message || 'Failed to render the selected letters.'
+    window.alert(detail)
+    return null
+  }
 }
-function viewSelected() {
-  window.alert('VIEW SELECTED is queued for Phase 4B (PDF rendering pipeline).')
+
+async function viewSelected() {
+  const res = await _renderSelected()
+  if (!res) return
+  const url = URL.createObjectURL(res.blob)
+  window.open(url, '_blank', 'noopener')
+  // Revoke later — the new tab needs the URL alive long enough for the
+  // browser to fetch the bytes.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  if (res.failed?.length) {
+    window.alert(`Preview opened — ${res.failed.length} letter(s) failed to render. See console for ids.`)
+  }
+}
+
+async function printSelected() {
+  // PRINT SELECTED is a single backend call now — the finalize-print
+  // pipeline renders, saves per-letter PDFs as case attachments, flips
+  // status to PRINTED, AND streams back the merged PDF for download.
+  // One round-trip = one render pass = no extra wait for the user.
+  const ids = selectedRows.value.slice()
+  if (ids.length === 0) {
+    window.alert('Select at least one letter first.')
+    return
+  }
+  try {
+    const { blob, failed } = await printQueueService.finalizePrint(ids)
+    if (failed?.length) {
+      console.warn('[print-queue] finalize-print partial failures:', failed)
+    }
+
+    // Trigger the file download.
+    const url = URL.createObjectURL(blob)
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `letters-${stamp}.pdf`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 10_000)
+
+    // Refresh — printed rows fall out of the default IN_PRINT_QUEUE filter.
+    selectedRows.value = []
+    await fetchPage()
+
+    if (failed?.length) {
+      window.alert(
+        `Printed ${ids.length - failed.length} of ${ids.length} letter(s). ` +
+        `${failed.length} failed and remain in the queue. See console for details.`,
+      )
+    }
+  } catch (e) {
+    console.error('[print-queue] finalize-print failed', e)
+    const detail = e?.data?.detail || e?.message || 'Print failed.'
+    window.alert(detail)
+  }
 }
 function openCase() {
   // Selection holds print_ids. Map back to case_id via the loaded rows.

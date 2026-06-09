@@ -1,9 +1,8 @@
-import { api } from '@/services/api.js'
+import { api, apiPostBlob } from '@/services/api.js'
 
 // HTTP calls for the /api/revp/printqueue/... endpoints. The Print Queue
 // is the per-tenant worklist of revp_print rows queued by Action Tracker's
-// CREATE LETTER button. Listing + lookups land in this file; the actual
-// PDF rendering pipeline (PRINT SELECTED / VIEW SELECTED) is Phase 4B.
+// CREATE LETTER button. Listing + lookups + render-merged.
 export const printQueueService = {
   list: ({
     page = 1,
@@ -39,4 +38,24 @@ export const printQueueService = {
   // Reference data for the filter row.
   // Returns: { letter_statuses: [...], document_types: [...], agents: [...] }
   lookups: () => api.get('/revp/printqueue/lookups/'),
+
+  // Render selected letters as a single merged PDF.
+  // Resolves to: { blob, failed } where `failed` is the parsed
+  // X-Render-Failed header (null when all rendered cleanly).
+  viewMerged: (printIds) =>
+    apiPostBlob('/revp/printqueue/view-merged/', { print_ids: printIds }),
+
+  // Flip selected rows' letter_status to PRINTED.
+  // After this resolves, the rows fall out of the default IN_PRINT_QUEUE
+  // filter and disappear from the queue on next refresh.
+  // Response: { marked: <int>, skipped: [{print_id, reason}, ...] }
+  markPrinted: (printIds) =>
+    api.post('/revp/printqueue/mark-printed/', { print_ids: printIds }),
+
+  // PRINT SELECTED full pipeline — renders, saves per-letter PDFs as
+  // case attachments, flips status to PRINTED, then returns the merged
+  // PDF as a Blob for download. One backend call, one render pass.
+  // Resolves to { blob, failed } same shape as viewMerged.
+  finalizePrint: (printIds) =>
+    apiPostBlob('/revp/printqueue/finalize-print/', { print_ids: printIds }),
 }
