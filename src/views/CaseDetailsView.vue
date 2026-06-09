@@ -1076,26 +1076,35 @@
       <!-- LETTERS -->
       <div v-show="activeTab === 'letters'">
         <div class="flex gap-sm" style="margin-bottom: 12px">
-          <button class="btn-action-light" @click="openLetter">OPEN LETTER</button>
-          <button class="btn-action-light" @click="previewLetter">PREVIEW LETTER</button>
-          <button class="btn-action-light" @click="editLetter">EDIT LETTER</button>
-          <button class="btn-action-light" @click="addLetter">ADD LETTER</button>
-          <button class="btn-action-light" @click="updateLetterStatus">UPDATE STATUS</button>
+          <button class="btn-action-light" :disabled="!letterSelected || lettersLoading" @click="openLetter">OPEN LETTER</button>
+          <button class="btn-action-light" :disabled="!letterSelected || lettersLoading" @click="previewLetter">PREVIEW LETTER</button>
+          <button class="btn-action-light" :disabled="!letterSelected || lettersLoading" @click="editLetter">EDIT LETTER</button>
+          <button class="btn-action-light" :disabled="lettersLoading" @click="addLetter">ADD LETTER</button>
+          <button class="btn-action-light" :disabled="!letterSelected || lettersLoading" @click="updateLetterStatus">UPDATE STATUS</button>
         </div>
         <div class="toolbar">
           <div class="flex items-center gap-sm">
-            <select v-model="perPage" class="rows-select">
+            <select v-model.number="lettersPerPage" class="rows-select">
               <option :value="5">5</option>
               <option :value="10">10</option>
+              <option :value="25">25</option>
+              <option :value="50">50</option>
             </select>
             <span class="toolbar-text">records per page</span>
           </div>
+        </div>
+        <div v-if="lettersError" class="error-banner" style="margin:8px 0;padding:8px 12px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:4px;font-size:0.875rem">
+          {{ lettersError }}
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th class="col-icon"><input type="checkbox" aria-label="Select all letters" /></th>
+                <th class="col-icon">
+                  <input type="checkbox"
+                         :checked="allLettersOnPageSelected"
+                         @change="toggleAllLettersOnPage" />
+                </th>
                 <th>Title</th>
                 <th>Status</th>
                 <th>Copies</th>
@@ -1107,14 +1116,111 @@
               </tr>
             </thead>
             <tbody>
-              <tr><td colspan="9"><div class="empty-state"><p class="empty-state-desc">No data available in table</p></div></td></tr>
+              <tr v-if="!lettersLoading && letterRows.length === 0">
+                <td colspan="9"><div class="empty-state"><p class="empty-state-desc">No letters queued for this case yet.</p></div></td>
+              </tr>
+              <tr v-for="row in pagedLetterRows" :key="row.comm_id"
+                  :class="{ 'row-selected': selectedLetterCommId === row.comm_id }">
+                <td class="col-icon">
+                  <input type="checkbox"
+                         :checked="selectedLetterCommId === row.comm_id"
+                         @change="toggleLetterRow(row.comm_id)" />
+                </td>
+                <td>{{ row.letter_template_title || '—' }}</td>
+                <td><span class="letter-status-text" :data-status="(row.letter_status_name || '').toUpperCase()">{{ row.letter_status_name || '—' }}</span></td>
+                <td>{{ row.copies ?? '—' }}</td>
+                <td>{{ fmtDateTime(row.created_dt) }}</td>
+                <td>{{ fmtDateTime(row.updated_dt) || '—' }}</td>
+                <td>{{ fmtDateTime(row.printed_dt) || '—' }}</td>
+                <td>{{ row.created_by_name || row.created_by || '—' }}</td>
+                <td>{{ row.updated_by_name || row.updated_by || '—' }}</td>
+              </tr>
             </tbody>
           </table>
         </div>
         <div class="pagination">
-          <span class="page-meta">Showing 0 to 0 of 0 entries</span>
-          <button class="page-btn" disabled>‹ Previous</button>
-          <button class="page-btn" disabled>Next ›</button>
+          <span class="page-meta">
+            Showing {{ lettersRangeStart }} to {{ lettersRangeEnd }} of {{ letterRows.length }} entries
+          </span>
+          <button class="page-btn" :disabled="lettersPage <= 1" @click="lettersPage--">‹ Previous</button>
+          <button v-for="p in lettersPageNumbers" :key="p" class="page-btn"
+                  :class="{ active: p === lettersPage }"
+                  :disabled="p === '…'"
+                  @click="p !== '…' && (lettersPage = p)">
+            {{ p }}
+          </button>
+          <button class="page-btn" :disabled="lettersPage >= lettersTotalPages" @click="lettersPage++">Next ›</button>
+        </div>
+      </div>
+
+      <!-- LETTER modal — ADD / EDIT share the same shape -->
+      <div v-if="letterModal.open" class="modal-backdrop" @click.self="closeLetterModal" style="position:fixed;inset:0;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;z-index:1000">
+        <div class="modal-card" style="background:#fff;border-radius:6px;width:480px;max-width:92vw;box-shadow:0 10px 25px rgba(0,0,0,0.2);display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #e5e7eb">
+            <h3 style="margin:0;font-size:1rem">{{ letterModal.mode === 'edit' ? 'Edit Letter' : 'Add Letter' }}</h3>
+            <button @click="closeLetterModal" style="border:none;background:transparent;font-size:1.5rem;line-height:1;cursor:pointer;color:#6b7280">×</button>
+          </div>
+          <div style="padding:16px 18px">
+            <div class="form-group">
+              <label class="form-label">Letter template *</label>
+              <select v-model="letterModal.templateId">
+                <option value="">Select a template…</option>
+                <option v-for="t in letterTemplateOptions" :key="t.letter_template_id" :value="t.letter_template_id">
+                  {{ t.title }}
+                </option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Copies</label>
+              <input v-model.number="letterModal.copies" type="number" min="1" max="50" style="width:100px" />
+            </div>
+            <div v-if="letterModal.error" class="error-banner" style="margin-top:8px;padding:8px 12px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:4px;font-size:0.875rem">
+              {{ letterModal.error }}
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid #e5e7eb;background:#f9fafb">
+            <button class="btn btn-secondary" @click="closeLetterModal" :disabled="letterModal.saving">Cancel</button>
+            <button class="btn btn-primary"
+                    :disabled="letterModal.saving || !letterModal.templateId"
+                    @click="submitLetterModal">
+              {{ letterModal.saving ? 'Saving…' : (letterModal.mode === 'edit' ? 'Save changes' : 'Queue letter') }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- UPDATE STATUS modal — simple dropdown of available statuses -->
+      <div v-if="statusModal.open" class="modal-backdrop" @click.self="closeStatusModal" style="position:fixed;inset:0;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;z-index:1000">
+        <div class="modal-card" style="background:#fff;border-radius:6px;width:420px;max-width:92vw;box-shadow:0 10px 25px rgba(0,0,0,0.2);display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #e5e7eb">
+            <h3 style="margin:0;font-size:1rem">Update Letter Status</h3>
+            <button @click="closeStatusModal" style="border:none;background:transparent;font-size:1.5rem;line-height:1;cursor:pointer;color:#6b7280">×</button>
+          </div>
+          <div style="padding:16px 18px">
+            <p class="text-light" style="margin:0 0 12px 0">
+              Current status: <strong>{{ statusModal.currentName || '—' }}</strong>
+            </p>
+            <div class="form-group">
+              <label class="form-label">New status *</label>
+              <select v-model="statusModal.newName">
+                <option value="">Select…</option>
+                <option v-for="s in letterStatusNames" :key="s" :value="s" :disabled="s === statusModal.currentName">
+                  {{ s }}
+                </option>
+              </select>
+            </div>
+            <div v-if="statusModal.error" class="error-banner" style="margin-top:8px;padding:8px 12px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:4px;font-size:0.875rem">
+              {{ statusModal.error }}
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid #e5e7eb;background:#f9fafb">
+            <button class="btn btn-secondary" @click="closeStatusModal" :disabled="statusModal.saving">Cancel</button>
+            <button class="btn btn-primary"
+                    :disabled="statusModal.saving || !statusModal.newName || statusModal.newName === statusModal.currentName"
+                    @click="submitStatusModal">
+              {{ statusModal.saving ? 'Updating…' : 'Update status' }}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1608,6 +1714,7 @@ import { actionsService }        from '@/services/actions.service.js'
 import { courtsService }    from '@/services/courts.service.js'
 import { paymentsService }  from '@/services/payments.service.js'
 import { addressesService } from '@/services/addresses.service.js'
+import { caseLettersService } from '@/services/case-letters.service.js'
 import AddressReferenceModal from '@/components/AddressReferenceModal.vue'
 import OffenderSearchModal   from '@/components/OffenderSearchModal.vue'
 import DescriptionModal      from '@/components/DescriptionModal.vue'
@@ -1616,6 +1723,17 @@ const route = useRoute()
 const router = useRouter()
 const headerOpen = ref(true)
 const activeTab = ref('actions')
+
+// Auto-fetch tab-scoped data when the operator clicks into it. Letters tab
+// fires `loadCaseLetters()` the first time it's opened and never re-fetches
+// implicitly — explicit refresh is via the toolbar refresh button.
+let _lettersLoadedOnce = false
+watch(activeTab, async (tab) => {
+  if (tab === 'letters' && !_lettersLoadedOnce) {
+    _lettersLoadedOnce = true
+    await loadCaseLetters()
+  }
+})
 
 // Edit state — starts true when the route was opened with ?mode=edit
 // (clicking Edit in the case list still works as a deep-link shortcut),
@@ -3681,11 +3799,292 @@ function deleteAttach()              { /* TODO */ }
 function openEmail()                 { /* TODO */ }
 function previewEmail()              { /* TODO */ }
 function addEmail()                  { /* TODO */ }
-function openLetter()                { /* TODO */ }
-function previewLetter()             { /* TODO */ }
-function editLetter()                { /* TODO */ }
-function addLetter()                 { /* TODO */ }
-function updateLetterStatus()        { /* TODO */ }
+// ── Letters tab ─────────────────────────────────────────────────────────
+//
+// Mirrors legacy Case Detail "Letters" tab:
+//   Title / Status / Copies / Created / Edited / Printed / Created By / Edited By
+// Single-row selection drives OPEN / PREVIEW / EDIT / UPDATE STATUS.
+// ADD LETTER works without a selection (it adds a new letter to this case).
+const letterRows           = ref([])
+const lettersLoading       = ref(false)
+const lettersError         = ref('')
+const selectedLetterCommId = ref('')
+const letterTemplateOptions = ref([])
+const lettersPage          = ref(1)
+const lettersPerPage       = ref(5)
+
+const letterSelected = computed(() =>
+  letterRows.value.some(r => r.comm_id === selectedLetterCommId.value)
+)
+
+function selectedLetterRow() {
+  return letterRows.value.find(r => r.comm_id === selectedLetterCommId.value) || null
+}
+
+// ── Client-side pagination (legacy parity: small per-case datasets) ─────
+const lettersTotalPages = computed(() =>
+  Math.max(1, Math.ceil(letterRows.value.length / lettersPerPage.value))
+)
+const lettersRangeStart = computed(() =>
+  letterRows.value.length === 0 ? 0 : (lettersPage.value - 1) * lettersPerPage.value + 1
+)
+const lettersRangeEnd = computed(() =>
+  Math.min(lettersPage.value * lettersPerPage.value, letterRows.value.length)
+)
+const pagedLetterRows = computed(() =>
+  letterRows.value.slice(lettersRangeStart.value - 1, lettersRangeEnd.value)
+)
+// Compact page-number list: 1 … current-1, current, current+1 … last
+const lettersPageNumbers = computed(() => {
+  const total = lettersTotalPages.value
+  const cur   = lettersPage.value
+  const out   = []
+  for (let i = 1; i <= total; i++) {
+    if (i === 1 || i === total || (i >= cur - 1 && i <= cur + 1)) {
+      out.push(i)
+    } else if (out[out.length - 1] !== '…') {
+      out.push('…')
+    }
+  }
+  return out.filter((p, i, arr) => p !== '…' || arr[i - 1] !== '…').slice(0, 7)
+})
+// Header checkbox: ticked only when the currently-selected row is on the
+// page; toggling it selects/deselects the first row on the page. Legacy
+// behaves as a single-select grid even though it uses checkbox controls.
+const allLettersOnPageSelected = computed(() =>
+  pagedLetterRows.value.length > 0 &&
+  pagedLetterRows.value.some(r => r.comm_id === selectedLetterCommId.value)
+)
+function toggleAllLettersOnPage() {
+  if (allLettersOnPageSelected.value) {
+    selectedLetterCommId.value = ''
+  } else if (pagedLetterRows.value.length) {
+    selectedLetterCommId.value = pagedLetterRows.value[0].comm_id
+  }
+}
+function toggleLetterRow(commId) {
+  // Enforce single-select even with checkbox controls — toggling a row
+  // either selects it or clears the selection entirely. Matches the way
+  // the OPEN / EDIT / PREVIEW buttons each operate on one letter at a time.
+  selectedLetterCommId.value = selectedLetterCommId.value === commId ? '' : commId
+}
+
+// Reset to page 1 when the data set or page size changes
+watch([letterRows, lettersPerPage], () => { lettersPage.value = 1 })
+
+const letterStatusNames = ['IN_PRINT_QUEUE', 'PRINTED', 'CANCELLED']
+
+function letterStatusColor(name) {
+  const u = (name || '').toUpperCase()
+  if (u === 'PRINTED')        return 'success'
+  if (u === 'IN_PRINT_QUEUE') return 'info'
+  if (u === 'CANCELLED')      return 'danger'
+  return 'neutral'
+}
+
+async function loadCaseLetters() {
+  const caseId = route.params.caseid
+  if (!caseId) return
+  lettersLoading.value = true
+  lettersError.value = ''
+  try {
+    letterRows.value = await caseLettersService.list(caseId) || []
+    // Clear selection if the previously-selected row is gone (e.g. after a reload).
+    if (!letterRows.value.some(r => r.comm_id === selectedLetterCommId.value)) {
+      selectedLetterCommId.value = ''
+    }
+  } catch (e) {
+    console.error('[case-letters] list failed', e)
+    lettersError.value = e?.message || 'Failed to load letters.'
+    letterRows.value = []
+  } finally {
+    lettersLoading.value = false
+  }
+}
+
+async function _ensureLetterTemplateOptions() {
+  if (letterTemplateOptions.value.length) return
+  try {
+    const data = await actionsService.letterTemplates()
+    letterTemplateOptions.value = data?.results ?? (Array.isArray(data) ? data : [])
+  } catch (e) {
+    console.error('[case-letters] template list failed', e)
+  }
+}
+
+// ADD / EDIT share the same modal.
+const letterModal = reactive({
+  open:       false,
+  mode:       'add',     // 'add' | 'edit'
+  commId:     '',        // populated in edit mode
+  templateId: '',
+  copies:     1,
+  saving:     false,
+  error:      '',
+})
+
+function closeLetterModal() {
+  if (letterModal.saving) return
+  letterModal.open = false
+}
+
+async function addLetter() {
+  letterModal.mode       = 'add'
+  letterModal.commId     = ''
+  letterModal.templateId = ''
+  letterModal.copies     = 1
+  letterModal.error      = ''
+  letterModal.saving     = false
+  letterModal.open       = true
+  await _ensureLetterTemplateOptions()
+}
+
+async function editLetter() {
+  const row = selectedLetterRow()
+  if (!row) return
+  if ((row.letter_status_name || '').toUpperCase() === 'PRINTED') {
+    window.alert('This letter has already been printed and cannot be edited.')
+    return
+  }
+  letterModal.mode       = 'edit'
+  letterModal.commId     = row.comm_id
+  letterModal.templateId = row.letter_template_id || ''
+  letterModal.copies     = row.copies || 1
+  letterModal.error      = ''
+  letterModal.saving     = false
+  letterModal.open       = true
+  await _ensureLetterTemplateOptions()
+}
+
+async function submitLetterModal() {
+  const caseId = route.params.caseid
+  if (!caseId || !letterModal.templateId) return
+  letterModal.saving = true
+  letterModal.error  = ''
+  try {
+    if (letterModal.mode === 'edit') {
+      await caseLettersService.update(caseId, letterModal.commId, {
+        letterTemplateId: letterModal.templateId,
+        copies:           letterModal.copies || 1,
+      })
+    } else {
+      // ADD reuses the bulk CREATE LETTER endpoint with a single case_id.
+      await actionsService.createLetter({
+        caseIds:          [caseId],
+        letterTemplateId: letterModal.templateId,
+        copies:           letterModal.copies || 1,
+      })
+    }
+    letterModal.open = false
+    await loadCaseLetters()
+  } catch (e) {
+    console.error('[case-letters] save failed', e)
+    letterModal.error = e?.data?.detail || e?.message || 'Save failed.'
+  } finally {
+    letterModal.saving = false
+  }
+}
+
+// OPEN LETTER + PREVIEW LETTER both render the rendered PDF via the existing
+// templates.preview-letter/ endpoint. OPEN downloads it; PREVIEW opens it
+// in a new tab inline. Distinction matches legacy semantics.
+async function _fetchLetterPdfBlob(commId, caseId) {
+  // The preview endpoint is GET with auth header — apiDownload fetches as
+  // attachment (forced download). For inline preview we want Blob+open.
+  // Use a direct fetch + Blob URL so we control the disposition client-side.
+  const { useAuthStore } = await import('@/store/auth.js')
+  const auth = useAuthStore()
+  const token = auth?.accessToken ?? null
+  const url = `/api/revp/templates/preview-letter/?case_id=${encodeURIComponent(caseId)}&comm_data_id=${encodeURIComponent(commId)}`
+  const resp = await fetch(url, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  })
+  if (!resp.ok) {
+    let detail = null
+    try { detail = await resp.json() } catch {}
+    throw new Error(detail?.detail || `Letter render failed (${resp.status})`)
+  }
+  return await resp.blob()
+}
+
+async function previewLetter() {
+  const row = selectedLetterRow()
+  if (!row) return
+  const caseId = route.params.caseid
+  try {
+    const blob = await _fetchLetterPdfBlob(row.comm_id, caseId)
+    const objUrl = URL.createObjectURL(blob)
+    window.open(objUrl, '_blank', 'noopener')
+    setTimeout(() => URL.revokeObjectURL(objUrl), 60_000)
+  } catch (e) {
+    console.error('[case-letters] preview failed', e)
+    window.alert(e?.message || 'Could not preview this letter.')
+  }
+}
+
+async function openLetter() {
+  const row = selectedLetterRow()
+  if (!row) return
+  const caseId = route.params.caseid
+  try {
+    const blob = await _fetchLetterPdfBlob(row.comm_id, caseId)
+    const objUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+    const title = (row.letter_template_title || 'letter').replace(/\s+/g, '_')
+    a.href = objUrl
+    a.download = `${title}-${stamp}.pdf`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    setTimeout(() => URL.revokeObjectURL(objUrl), 10_000)
+  } catch (e) {
+    console.error('[case-letters] open failed', e)
+    window.alert(e?.message || 'Could not download this letter.')
+  }
+}
+
+// UPDATE STATUS modal
+const statusModal = reactive({
+  open:        false,
+  currentName: '',
+  newName:     '',
+  saving:      false,
+  error:       '',
+})
+
+function closeStatusModal() {
+  if (statusModal.saving) return
+  statusModal.open = false
+}
+
+function updateLetterStatus() {
+  const row = selectedLetterRow()
+  if (!row) return
+  statusModal.currentName = row.letter_status_name || ''
+  statusModal.newName     = ''
+  statusModal.error       = ''
+  statusModal.saving      = false
+  statusModal.open        = true
+}
+
+async function submitStatusModal() {
+  const row = selectedLetterRow()
+  const caseId = route.params.caseid
+  if (!row || !caseId || !statusModal.newName) return
+  statusModal.saving = true
+  statusModal.error  = ''
+  try {
+    await caseLettersService.changeStatus(caseId, row.comm_id, statusModal.newName)
+    statusModal.open = false
+    await loadCaseLetters()
+  } catch (e) {
+    console.error('[case-letters] status change failed', e)
+    statusModal.error = e?.data?.detail || e?.message || 'Status change failed.'
+  } finally {
+    statusModal.saving = false
+  }
+}
 // ── Linked Cases controls ────────────────────────────────────────────────────
 // Single-select: the row that's currently checked in the Linked Cases table.
 // Drives OPEN SELECTED CASE + UNLINK SELECTED CASE.
@@ -4112,4 +4511,10 @@ async function confirmLink() {
   background: var(--primary-tint, #eef2ff);
   outline: none;
 }
+
+/* Letters tab — status as inline coloured text (matches legacy: no badge background) */
+.letter-status-text { font-weight: 600; color: var(--text-strong, #1f2937); }
+.letter-status-text[data-status="IN_PRINT_QUEUE"] { color: #d97706; }   /* amber */
+.letter-status-text[data-status="PRINTED"]        { color: #047857; }   /* green */
+.letter-status-text[data-status="CANCELLED"]      { color: #b91c1c; }   /* red */
 </style>
