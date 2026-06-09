@@ -286,39 +286,85 @@
            revp_vehicle_details row instead of revp_journey_details. -->
       <div v-show="activeTab === 'journey' && isPcnCase">
         <div class="two-col">
-          <div class="form-row-left">
-            <label class="form-label-left">Vehicle Reg<span class="req">*</span></label>
-            <input v-model.trim="form.vehicleReg" type="text" maxlength="12" placeholder="e.g. AB12 XYZ" style="text-transform:uppercase"
-                   @input="form.vehicleReg = form.vehicleReg.toUpperCase()" />
+          <!-- LEFT: Vehicle Details + Offence Times -->
+          <div class="right-stack">
+            <fieldset class="legend-group">
+              <legend>Vehicle Details</legend>
+              <div class="form-row-left">
+                <label class="form-label-left">Vehicle Reg<span class="req">*</span></label>
+                <input v-model.trim="form.vehicleReg" type="text" maxlength="12" placeholder="e.g. AB12 XYZ" style="text-transform:uppercase"
+                       @input="form.vehicleReg = form.vehicleReg.toUpperCase()" />
 
-            <label class="form-label-left">Colour</label>
-            <input v-model.trim="form.vehicleColour" type="text" maxlength="20" placeholder="e.g. Silver" />
+                <label class="form-label-left">Manufacturer</label>
+                <input v-model.trim="form.vehicleMake" type="text" maxlength="20" placeholder="e.g. Ford" />
 
-            <label class="form-label-left">Make</label>
-            <input v-model.trim="form.vehicleMake" type="text" maxlength="20" placeholder="e.g. Ford" />
+                <label class="form-label-left">Model</label>
+                <input v-model.trim="form.vehicleModel" type="text" maxlength="30" placeholder="e.g. Focus" />
 
-            <label class="form-label-left">Model</label>
-            <input v-model.trim="form.vehicleModel" type="text" maxlength="30" placeholder="e.g. Focus" />
+                <label class="form-label-left">Colour</label>
+                <input v-model.trim="form.vehicleColour" type="text" maxlength="20" placeholder="e.g. Silver" />
+              </div>
+            </fieldset>
 
-            <label class="form-label-left">Issue Reason</label>
-            <input v-model.trim="form.carparkIssueReason" type="text" maxlength="50" placeholder="Reason for the PCN" />
+            <fieldset class="legend-group">
+              <legend>Offence Times</legend>
+              <div class="form-row-left">
+                <label class="form-label-left">Offence From (time)</label>
+                <input v-model="form.offenceFromTime" type="time" />
 
-            <label class="form-label-left">Carpark Details</label>
-            <textarea v-model="form.carparkDetails" rows="3" maxlength="1000" placeholder="Notes about the location / circumstances"></textarea>
+                <label class="form-label-left">Offence To (time)</label>
+                <input v-model="form.offenceToTime" type="time" />
+
+                <label class="form-label-left">Pay-Display Ticket Number</label>
+                <input v-model.trim="form.payDisplayTicketNum" type="text" maxlength="45" />
+
+                <label class="form-label-left">Pay-Display Expiry (time)</label>
+                <input v-model="form.payDisplayTicketExpiry" type="time" />
+              </div>
+            </fieldset>
           </div>
 
-          <div class="form-row-left">
-            <label class="form-label-left">Offence From (time)</label>
-            <input v-model="form.offenceFromTime" type="time" />
+          <!-- RIGHT: Offence Location + POPLA -->
+          <div class="right-stack">
+            <fieldset class="legend-group">
+              <legend>Offence Location</legend>
+              <div class="form-row-left">
+                <label class="form-label-left">Reason for Issue</label>
+                <select v-model="form.carparkIssueReason">
+                  <option value="">Please Select</option>
+                  <option v-for="r in pcnIssueReasonOptions" :key="r.lookup_data_id" :value="r.lookup_data_value">{{ r.lookup_data_value }}</option>
+                </select>
 
-            <label class="form-label-left">Offence To (time)</label>
-            <input v-model="form.offenceToTime" type="time" />
+                <label class="form-label-left">Car Park Location</label>
+                <select v-model="form.carparkLocationId">
+                  <option value="">Please Select</option>
+                  <option v-for="loc in carParkLocationOptions" :key="loc.carpark_location_id" :value="loc.carpark_location_id">{{ loc.location_name }}</option>
+                </select>
 
-            <label class="form-label-left">Pay-Display Ticket Number</label>
-            <input v-model.trim="form.payDisplayTicketNum" type="text" maxlength="45" />
+                <label class="form-label-left">Carpark Details</label>
+                <textarea v-model="form.carparkDetails" rows="3" maxlength="1000" placeholder="Notes about the location / circumstances"></textarea>
+              </div>
+            </fieldset>
 
-            <label class="form-label-left">Pay-Display Expiry (time)</label>
-            <input v-model="form.payDisplayTicketExpiry" type="time" />
+            <fieldset class="legend-group">
+              <legend>POPLA</legend>
+              <div class="form-row-left">
+                <label class="form-label-left">POPLA Appeal</label>
+                <input v-model="form.poplaAppeal" type="checkbox" />
+
+                <label class="form-label-left">POPLA Start Date</label>
+                <input v-model="form.poplaStartDate" type="date" />
+
+                <label class="form-label-left">POPLA End Date</label>
+                <input v-model="form.poplaEndDate" type="date" />
+
+                <label class="form-label-left">POPLA Reference</label>
+                <input v-model.trim="form.poplaRefNum" type="text" maxlength="50" />
+
+                <label class="form-label-left">Accepted</label>
+                <input v-model="form.poplaAccepted" type="checkbox" />
+              </div>
+            </fieldset>
           </div>
         </div>
       </div>
@@ -646,6 +692,7 @@ import { lookupService }    from '@/services/lookup.service.js'
 import { api }              from '@/services/api.js'
 import { addressesService } from '@/services/addresses.service.js'
 import { stationsService }  from '@/services/stations.service.js'
+import { carParksService }  from '@/services/car-parks.service.js'
 import AddressReferenceModal from '@/components/AddressReferenceModal.vue'
 import OffenderSearchModal   from '@/components/OffenderSearchModal.vue'
 import DescriptionModal      from '@/components/DescriptionModal.vue'
@@ -852,6 +899,9 @@ const reasonForIssueOptions = ref([])
 const reasonForIssueLoading = ref(false)
 const reasonForIssueError   = ref('')
 
+const pcnIssueReasonOptions  = ref([])
+const carParkLocationOptions = ref([])
+
 const railCardTypeOptions = ref([])
 const questionAtOptions   = ref([])
 
@@ -875,6 +925,8 @@ onMounted(() => {
   loadLookup('OCCUPATION',               employmentStatuses,   employmentLoading,     employmentError)
   loadLookup('CASE_VERIFICATION_TYPE',   verificationTypes,    verificationLoading,   verificationError)
   loadLookup('CASE_REASON_FOR_ISSUE', reasonForIssueOptions, reasonForIssueLoading, reasonForIssueError)
+  lookupService.listByType('REASON_FOR_ISSUE_FOR_PCN').then(d => { pcnIssueReasonOptions.value = Array.isArray(d) ? d : [] }).catch(() => {})
+  carParksService.getAll().then(d => { carParkLocationOptions.value = Array.isArray(d) ? d : [] }).catch(() => {})
   api.get('/revp/misc/railcards/').then(d => { railCardTypeOptions.value = d?.results || [] }).catch(() => {})
   journeyService.getQuestionAtOptions().then(d => { questionAtOptions.value = Array.isArray(d) ? d : [] }).catch(() => {})
   document.addEventListener('mousedown', onDocMousedown)
@@ -995,11 +1047,17 @@ const form = reactive({
   vehicleMake:       '',   // maps to manufacturer
   vehicleModel:      '',
   carparkIssueReason: '',
+  carparkLocationId:  '',
   offenceFromTime:   '',
   offenceToTime:     '',
   payDisplayTicketNum:   '',
   payDisplayTicketExpiry: '',
   carparkDetails:    '',
+  poplaAppeal:       false,
+  poplaStartDate:    '',
+  poplaEndDate:      '',
+  poplaRefNum:       '',
+  poplaAccepted:     false,
 })
 
 const outstanding = computed(() => {
@@ -1393,9 +1451,11 @@ function signatureFlags() {
 function hasAnyVehicleData() {
   return Boolean(
     form.vehicleReg || form.vehicleColour || form.vehicleMake || form.vehicleModel ||
-    form.carparkIssueReason || form.carparkDetails ||
+    form.carparkIssueReason || form.carparkLocationId || form.carparkDetails ||
     form.offenceFromTime || form.offenceToTime ||
-    form.payDisplayTicketNum || form.payDisplayTicketExpiry,
+    form.payDisplayTicketNum || form.payDisplayTicketExpiry ||
+    form.poplaAppeal || form.poplaStartDate || form.poplaEndDate ||
+    form.poplaRefNum || form.poplaAccepted,
   )
 }
 
@@ -1414,6 +1474,12 @@ function buildVehiclePayload(caseId) {
   if (form.offenceToTime)       payload.offence_to     = form.offenceToTime
   if (form.payDisplayTicketNum) payload.pay_display_ticket_num    = form.payDisplayTicketNum
   if (form.payDisplayTicketExpiry) payload.pay_display_ticket_expiry = form.payDisplayTicketExpiry
+  if (form.carparkLocationId)  payload.carpark_location_id = form.carparkLocationId
+  if (form.poplaAppeal)        payload.popla_appeal        = 1
+  if (form.poplaStartDate)     payload.popla_start_dt      = form.poplaStartDate
+  if (form.poplaEndDate)       payload.popla_end_dt        = form.poplaEndDate
+  if (form.poplaRefNum)        payload.popla_ref_num       = form.poplaRefNum
+  if (form.poplaAccepted)      payload.popla_accepted      = 1
   return payload
 }
 
@@ -1476,24 +1542,6 @@ async function addThisCase() {
   let verificationId = savedVerificationId.value
   let vehicleId      = savedVehicleId.value
 
-  // Temp diagnostic — confirms the orchestration ran and saw the form values.
-  // eslint-disable-next-line no-console
-  console.debug('[add-case] submit', {
-    has_customer_data: hasAnyCustomerData(),
-    has_journey_data:  hasAnyJourneyData(),
-    reusing_customer:  Boolean(customerId),
-    reusing_journey:   Boolean(journeyId),
-    customer_payload:  hasAnyCustomerData() ? buildCustomerPayload() : null,
-    journey_form_snapshot: {
-      place:            form.place,
-      journeyFrom:      form.journeyFrom,
-      journeyTo:        form.journeyTo,
-      timeDateOfTravel: form.timeDateOfTravel,
-      smartcardNumber:  form.smartcardNumber,
-      fareTravelled:    form.fareTravelled,
-      farePaid:         form.farePaid,
-    },
-  })
   try {
     // Step 1 — find-or-create customer. Backend matches the legacy
     // CustomerService.getCustomerID() — exact 6-field match (first_name +

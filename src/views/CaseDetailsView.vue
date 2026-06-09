@@ -424,16 +424,20 @@
                 <legend>Vehicle details</legend>
                 <div class="form-row-left">
                   <label class="form-label-left">Registration number</label>
-                  <input :value="vehicle.regNum" readonly class="field-readonly" />
+                  <input v-if="isEditMode" v-model="vehicleForm.reg_num" class="field-editable" />
+                  <input v-else :value="vehicle.regNum" readonly class="field-readonly" />
 
                   <label class="form-label-left">Manufacturer</label>
-                  <input :value="vehicle.manufacturer" readonly class="field-readonly" />
+                  <input v-if="isEditMode" v-model="vehicleForm.manufacturer" class="field-editable" />
+                  <input v-else :value="vehicle.manufacturer" readonly class="field-readonly" />
 
                   <label class="form-label-left">Model</label>
-                  <input :value="vehicle.model" readonly class="field-readonly" />
+                  <input v-if="isEditMode" v-model="vehicleForm.model" class="field-editable" />
+                  <input v-else :value="vehicle.model" readonly class="field-readonly" />
 
                   <label class="form-label-left">Colour</label>
-                  <input :value="vehicle.colour" readonly class="field-readonly" />
+                  <input v-if="isEditMode" v-model="vehicleForm.colour" class="field-editable" />
+                  <input v-else :value="vehicle.colour" readonly class="field-readonly" />
                 </div>
               </fieldset>
 
@@ -441,16 +445,20 @@
                 <legend>Offence Times</legend>
                 <div class="form-row-left">
                   <label class="form-label-left">Time From</label>
-                  <input :value="vehicle.offenceFrom" readonly class="field-readonly" />
+                  <input v-if="isEditMode" v-model="vehicleForm.offence_from" class="field-editable" placeholder="HH:MM" />
+                  <input v-else :value="vehicle.offenceFrom" readonly class="field-readonly" />
 
                   <label class="form-label-left">Time To</label>
-                  <input :value="vehicle.offenceTo" readonly class="field-readonly" />
+                  <input v-if="isEditMode" v-model="vehicleForm.offence_to" class="field-editable" placeholder="HH:MM" />
+                  <input v-else :value="vehicle.offenceTo" readonly class="field-readonly" />
 
                   <label class="form-label-left">P&amp;D Ticket</label>
-                  <input :value="vehicle.payDisplayTicketNum" readonly class="field-readonly" />
+                  <input v-if="isEditMode" v-model="vehicleForm.pay_display_ticket_num" class="field-editable" />
+                  <input v-else :value="vehicle.payDisplayTicketNum" readonly class="field-readonly" />
 
                   <label class="form-label-left">Expiry Time</label>
-                  <input :value="vehicle.payDisplayTicketExpiry" readonly class="field-readonly" />
+                  <input v-if="isEditMode" v-model="vehicleForm.pay_display_ticket_expiry" class="field-editable" placeholder="Expiry Time" />
+                  <input v-else :value="vehicle.payDisplayTicketExpiry" readonly class="field-readonly" />
                 </div>
               </fieldset>
             </div>
@@ -460,17 +468,26 @@
                 <legend>Offence Location</legend>
                 <div class="form-row-left">
                   <label class="form-label-left">Reason for Issue</label>
-                  <select :value="vehicle.issueReason" disabled class="field-readonly">
+                  <select v-if="isEditMode" v-model="vehicleForm.issue_for_reason" class="field-editable">
+                    <option value="">Please Select</option>
+                    <option v-for="r in pcnIssueReasonOptions" :key="r.lookup_data_id" :value="r.lookup_data_value">{{ r.lookup_data_value }}</option>
+                  </select>
+                  <select v-else :value="vehicle.issueReason" disabled class="field-readonly">
                     <option>{{ vehicle.issueReason }}</option>
                   </select>
 
                   <label class="form-label-left">Car Park Location</label>
-                  <select :value="vehicle.carParkLocation" disabled class="field-readonly">
-                    <option>{{ vehicle.carParkLocation }}</option>
+                  <select v-if="isEditMode" v-model="vehicleForm.carpark_location_id" class="field-editable">
+                    <option value="">Please Select</option>
+                    <option v-for="loc in carParkLocationOptions" :key="loc.carpark_location_id" :value="loc.carpark_location_id">{{ loc.location_name }}</option>
+                  </select>
+                  <select v-else :value="vehicle.carParkLocationId" disabled class="field-readonly">
+                    <option :value="vehicle.carParkLocationId">{{ vehicle.carParkLocation }}</option>
                   </select>
 
                   <label class="form-label-left">Extra Details</label>
-                  <textarea :value="vehicle.carparkDetails" readonly rows="4" class="field-readonly"></textarea>
+                  <textarea v-if="isEditMode" v-model="vehicleForm.carpark_details" rows="4" class="field-editable"></textarea>
+                  <textarea v-else :value="vehicle.carparkDetails" readonly rows="4" class="field-readonly"></textarea>
                 </div>
               </fieldset>
 
@@ -478,19 +495,24 @@
                 <legend>POPLA</legend>
                 <div class="form-row-left">
                   <label class="form-label-left">POPLA Appeal</label>
-                  <input type="checkbox" :checked="vehicle.poplaAppeal" disabled />
+                  <input v-if="isEditMode" type="checkbox" v-model="vehicleForm.popla_appeal" />
+                  <input v-else type="checkbox" :checked="vehicle.poplaAppeal" disabled />
 
                   <label class="form-label-left">Start Date</label>
-                  <input :value="vehicle.poplaStartDate" readonly placeholder="Start Date" class="field-readonly" />
+                  <input v-if="isEditMode" v-model="vehicleForm.popla_start_dt" type="date" class="field-editable" />
+                  <input v-else :value="vehicle.poplaStartDate" readonly placeholder="Start Date" class="field-readonly" />
 
                   <label class="form-label-left">End Date</label>
-                  <input :value="vehicle.poplaEndDate" readonly placeholder="End Date" class="field-readonly" />
+                  <input v-if="isEditMode" v-model="vehicleForm.popla_end_dt" type="date" class="field-editable" />
+                  <input v-else :value="vehicle.poplaEndDate" readonly placeholder="End Date" class="field-readonly" />
 
                   <label class="form-label-left">Reference Number</label>
-                  <input :value="vehicle.poplaReference" readonly class="field-readonly" />
+                  <input v-if="isEditMode" v-model="vehicleForm.popla_ref_num" class="field-editable" />
+                  <input v-else :value="vehicle.poplaRefNum" readonly class="field-readonly" />
 
                   <label class="form-label-left">Accepted</label>
-                  <input type="checkbox" :checked="vehicle.poplaAccepted" disabled />
+                  <input v-if="isEditMode" type="checkbox" v-model="vehicleForm.popla_accepted" />
+                  <input v-else type="checkbox" :checked="vehicle.poplaAccepted" disabled />
                 </div>
               </fieldset>
             </div>
@@ -1421,6 +1443,7 @@ import { lookupService }    from '@/services/lookup.service.js'
 import { api }              from '@/services/api.js'
 import { journeyService }   from '@/services/journey.service.js'
 import { vehiclesService }  from '@/services/vehicles.service.js'
+import { carParksService }  from '@/services/car-parks.service.js'
 import { actionsService }        from '@/services/actions.service.js'
 import { courtsService }    from '@/services/courts.service.js'
 import { paymentsService }  from '@/services/payments.service.js'
@@ -1491,8 +1514,10 @@ async function enterEditMode() {
     _ensureTitleOptions(),
     _ensureVerificationOptions(),
     _ensureReasonOptions(),
+    isPcnCase.value && hasVehicle.value ? _ensurePcnOptions() : Promise.resolve(),
   ])
   _populateCustomerForm()
+  if (isPcnCase.value && hasVehicle.value) _populateVehicleForm()
   isEditMode.value = true
 }
 
@@ -1645,7 +1670,30 @@ async function saveEdit() {
       })
     }
 
-    // 5. Re-hydrate every tab from the server.
+    // 5. Vehicle save — PCN cases with an existing vehicle row.
+    const vehicleId = vehicle.vehicleId
+    if (vehicleId && isPcnCase.value) {
+      await vehiclesService.update(vehicleId, {
+        reg_num:                   vehicleForm.reg_num                   || null,
+        colour:                    vehicleForm.colour                    || null,
+        manufacturer:              vehicleForm.manufacturer              || null,
+        model:                     vehicleForm.model                     || null,
+        issue_for_reason:          vehicleForm.issue_for_reason          || null,
+        carpark_location_id:       vehicleForm.carpark_location_id       || null,
+        carpark_details:           vehicleForm.carpark_details           || null,
+        offence_from:              vehicleForm.offence_from              || null,
+        offence_to:                vehicleForm.offence_to                || null,
+        pay_display_ticket_num:    vehicleForm.pay_display_ticket_num    || null,
+        pay_display_ticket_expiry: vehicleForm.pay_display_ticket_expiry || null,
+        popla_appeal:              vehicleForm.popla_appeal ? 1 : 0,
+        popla_start_dt:            vehicleForm.popla_start_dt            || null,
+        popla_end_dt:              vehicleForm.popla_end_dt              || null,
+        popla_ref_num:             vehicleForm.popla_ref_num             || null,
+        popla_accepted:            vehicleForm.popla_accepted ? 1 : 0,
+      })
+    }
+
+    // 6. Re-hydrate every tab from the server.
     await loadCase()
     isEditMode.value = false
     Swal.fire({
@@ -1682,6 +1730,46 @@ const _caseRow = ref(null)
 // Raw journey API response — kept so enterEditMode() can seed journeyForm
 // without an extra fetch. Set by hydrateJourney().
 const _journeyRaw = ref(null)
+
+// Edit buffer for the Car Park / Vehicle details tab. Field names match
+// the backend PUT payload so saveEdit() can pass them directly.
+const vehicleForm = reactive({
+  reg_num:                   '',
+  colour:                    '',
+  manufacturer:              '',
+  model:                     '',
+  issue_for_reason:          '',
+  carpark_location_id:       '',   // ID of the selected car park location
+  carpark_details:           '',
+  offence_from:              '',
+  offence_to:                '',
+  pay_display_ticket_num:    '',
+  pay_display_ticket_expiry: '',
+  popla_appeal:              false,
+  popla_start_dt:            '',
+  popla_end_dt:              '',
+  popla_ref_num:             '',
+  popla_accepted:            false,
+})
+
+function _populateVehicleForm() {
+  vehicleForm.reg_num                   = vehicle.regNum
+  vehicleForm.colour                    = vehicle.colour
+  vehicleForm.manufacturer              = vehicle.manufacturer
+  vehicleForm.model                     = vehicle.model
+  vehicleForm.issue_for_reason          = vehicle.issueReason
+  vehicleForm.carpark_location_id       = vehicle.carParkLocationId
+  vehicleForm.carpark_details           = vehicle.carparkDetails
+  vehicleForm.offence_from              = vehicle.offenceFrom
+  vehicleForm.offence_to                = vehicle.offenceTo
+  vehicleForm.pay_display_ticket_num    = vehicle.payDisplayTicketNum
+  vehicleForm.pay_display_ticket_expiry = vehicle.payDisplayTicketExpiry
+  vehicleForm.popla_appeal              = vehicle.poplaAppeal
+  vehicleForm.popla_start_dt            = vehicle.poplaStartDate
+  vehicleForm.popla_end_dt              = vehicle.poplaEndDate
+  vehicleForm.popla_ref_num             = vehicle.poplaRefNum
+  vehicleForm.popla_accepted            = vehicle.poplaAccepted
+}
 
 // Edit buffer for the Journey Details tab. Field names match the backend
 // PATCH payload (snake_case) so saveEdit() can pass them directly.
@@ -1929,6 +2017,27 @@ async function _ensureVerificationOptions() {
 async function _ensureReasonOptions() {
   if (_reasonOptionsLoaded) return
   try { reasonForIssueOptions.value = await lookupService.listByType('CASE_REASON_FOR_ISSUE'); _reasonOptionsLoaded = true } catch { /* use empty */ }
+}
+
+// PCN car park dropdown options — issue reasons and car park locations,
+// loaded lazily the first time a PCN case enters edit mode.
+const pcnIssueReasonOptions  = ref([])
+const carParkLocationOptions = ref([])
+let _pcnOptionsLoaded = false
+
+async function _ensurePcnOptions() {
+  if (_pcnOptionsLoaded) return
+  const [reasonsResult, locationsResult] = await Promise.allSettled([
+    lookupService.listByType('REASON_FOR_ISSUE_FOR_PCN'),
+    carParksService.getAll(),
+  ])
+  if (reasonsResult.status === 'fulfilled') {
+    pcnIssueReasonOptions.value = Array.isArray(reasonsResult.value) ? reasonsResult.value : []
+  }
+  if (locationsResult.status === 'fulfilled') {
+    carParkLocationOptions.value = Array.isArray(locationsResult.value) ? locationsResult.value : []
+  }
+  _pcnOptionsLoaded = true
 }
 
 // Customer signature lookup — three legacy options that map back to two
@@ -2334,7 +2443,8 @@ function hydrateVehicle(v) {
   vehicle.manufacturer           = v.manufacturer || ''
   vehicle.model                  = v.model        || ''
   vehicle.issueReason            = v.issue_for_reason || ''
-  vehicle.carParkLocation        = v.car_park_location || v.station_name || ''
+  vehicle.carParkLocationId      = v.carpark_location?.id || ''
+  vehicle.carParkLocation        = v.carpark_location?.location_name || ''
   vehicle.offenceFrom            = v.offence_from || ''
   vehicle.offenceTo              = v.offence_to   || ''
   vehicle.payDisplayTicketNum    = v.pay_display_ticket_num    || ''
@@ -2342,9 +2452,9 @@ function hydrateVehicle(v) {
   vehicle.carparkDetails         = v.carpark_details || ''
   // POPLA fields — defensive: backend may not return these yet.
   vehicle.poplaAppeal     = Boolean(v.popla_appeal)
-  vehicle.poplaStartDate  = v.popla_start_date || ''
-  vehicle.poplaEndDate    = v.popla_end_date   || ''
-  vehicle.poplaReference  = v.popla_reference  || ''
+  vehicle.poplaStartDate  = v.popla_start_dt  || ''
+  vehicle.poplaEndDate    = v.popla_end_dt    || ''
+  vehicle.poplaRefNum     = v.popla_ref_num   || ''
   vehicle.poplaAccepted   = Boolean(v.popla_accepted)
 }
 
@@ -2403,7 +2513,8 @@ const vehicle = reactive({
   manufacturer: '',
   model: '',
   issueReason: '',
-  carParkLocation: '',
+  carParkLocationId: '',   // ID sent on save
+  carParkLocation: '',     // display name shown in view mode
   offenceFrom: '',
   offenceTo: '',
   payDisplayTicketNum: '',
@@ -2415,7 +2526,7 @@ const vehicle = reactive({
   poplaAppeal: false,
   poplaStartDate: '',
   poplaEndDate: '',
-  poplaReference: '',
+  poplaRefNum: '',
   poplaAccepted: false,
 })
 const hasVehicle = computed(() => Boolean(vehicle.vehicleId))
@@ -2574,9 +2685,12 @@ onMounted(async () => {
   // isEditMode is already true and enterEditMode() is never called.
   // Seed dropdown options and form values here so every field comes up filled.
   if (isEditMode.value) {
-    await Promise.all([ensureStatusOptions(), _ensureTitleOptions(), _ensureVerificationOptions(), _ensureReasonOptions()])
+    const opts = [ensureStatusOptions(), _ensureTitleOptions(), _ensureVerificationOptions(), _ensureReasonOptions()]
+    if (isPcnCase.value && hasVehicle.value) opts.push(_ensurePcnOptions())
+    await Promise.all(opts)
     _populateCustomerForm()
     if (_journeyRaw.value) { _populateJourneyForm(); ensureQuestionAtOptions(); _ensureRailCardTypeOptions() }
+    if (isPcnCase.value && hasVehicle.value) _populateVehicleForm()
   }
 })
 
