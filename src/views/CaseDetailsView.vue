@@ -644,10 +644,12 @@
               <legend>Court</legend>
               <div class="form-row-left">
                 <label class="form-label-left">Court</label>
-                <select :value="court.court" disabled class="field-readonly"><option>Please Select Court</option></select>
+                <input :value="court.court || ''" readonly class="field-readonly"
+                       :placeholder="court.court ? '' : 'No court assigned'" />
 
                 <label class="form-label-left">Court Booking</label>
-                <select :value="court.courtBooking" disabled class="field-readonly"><option>Please Select Court Booking</option></select>
+                <input :value="court.courtBooking || ''" readonly class="field-readonly"
+                       :placeholder="court.courtBooking ? '' : 'No booking assigned'" />
 
                 <label class="form-label-left">Court Reference</label>
                 <input :value="court.courtReference" readonly class="field-readonly" />
@@ -658,7 +660,8 @@
               <legend>Result</legend>
               <div class="form-row-left">
                 <label class="form-label-left">Court Result</label>
-                <select :value="court.courtResult" disabled class="field-readonly"><option>Please Select</option></select>
+                <input :value="court.courtResult || ''" readonly class="field-readonly"
+                       :placeholder="court.courtResult ? '' : 'No result entered'" />
 
                 <label class="form-label-left">Costs</label>
                 <div class="input-currency"><span class="prefix">£</span><input :value="court.costs" readonly class="field-readonly" /></div>
