@@ -90,6 +90,9 @@ export const actionsService = {
   // Letter templates for the dropdown. Returns the active list for the tenant.
   letterTemplates: () => api.get('/revp/templates/letters/?active=1'),
 
+  // Email templates for the dropdown. Returns active templates for the tenant.
+  emailTemplates: () => api.get('/revp/templates/emails/?active=1'),
+
   // ASSIGN COURT BOOKINGS — picker options for selected cases.
   // Returns [{court_id, court_name, cases: [{case_id, case_num}], bookings: [...]}, ...]
   courtBookingOptions: (caseIds) =>

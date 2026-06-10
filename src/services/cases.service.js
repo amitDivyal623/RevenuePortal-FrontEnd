@@ -1,4 +1,4 @@
-import { api } from '@/services/api.js'
+import { api, apiDownload } from '@/services/api.js'
 
 // All HTTP calls for the /revp/cases/... endpoints. Pure transport —
 // no state, no loading flags. Stores own state; views read from stores.
@@ -62,6 +62,17 @@ export const casesService = {
     fd.append('file', file, file.name)
     return api.upload(`/revp/cases/${encodeURIComponent(id)}/attachments/`, fd)
   },
+  deleteAttachment: (caseId, attachmentId) =>
+    api.delete(`/revp/cases/${encodeURIComponent(caseId)}/attachments/${encodeURIComponent(attachmentId)}/`),
+  downloadAttachment: (caseId, attachmentId, filename) =>
+    apiDownload(`/revp/cases/${encodeURIComponent(caseId)}/attachments/${encodeURIComponent(attachmentId)}/download/`, filename),
+
+  // ── Audit export ──────────────────────────────────────────────────────────
+  exportAudit: (caseId) =>
+    apiDownload(
+      `/revp/cases/${encodeURIComponent(caseId)}/audit/export/`,
+      `audit_${String(caseId).substring(0, 8)}.xlsx`,
+    ),
 }
 
 // Private helper — turns the filter args object into the query string the

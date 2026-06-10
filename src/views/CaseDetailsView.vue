@@ -823,7 +823,7 @@
           <legend>Payments</legend>
           <div class="flex gap-sm mb-md">
             <button class="btn-action-light" @click="registerPayment">REGISTER PAYMENT</button>
-            <button class="btn-action-red" @click="deletePayment">DELETE PAYMENT</button>
+            <button class="btn-action-red"   @click="deletePayment"   :disabled="selectedPaymentIds.size === 0">DELETE PAYMENT</button>
           </div>
           <div class="payment-grid">
             <div class="ch-field"><label>Amount Due</label><div class="input-currency"><span class="prefix">£</span><input :value="payment.amountDue" readonly class="field-readonly" /></div></div>
@@ -850,7 +850,15 @@
           <table>
             <thead>
               <tr>
-                <th class="col-icon"><input type="checkbox" aria-label="Select all payments" /></th>
+                <th class="col-icon">
+                  <input
+                    type="checkbox"
+                    aria-label="Select all payments"
+                    :checked="paymentRows.length > 0 && paymentRows.every(r => selectedPaymentIds.has(r.payment_id))"
+                    :indeterminate="selectedPaymentIds.size > 0 && !paymentRows.every(r => selectedPaymentIds.has(r.payment_id))"
+                    @change="toggleAllPayments"
+                  />
+                </th>
                 <th>Date Taken</th>
                 <th>Payment Type</th>
                 <th>Payment Method</th>
@@ -860,27 +868,60 @@
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td colspan="7"><div class="empty-state"><p class="empty-state-desc">No data available in table</p></div></td>
-              </tr>
+              <template v-if="paymentLoading">
+                <tr><td colspan="7" class="state-row">Loading…</td></tr>
+              </template>
+              <template v-else-if="paymentRows.length === 0">
+                <tr>
+                  <td colspan="7"><div class="empty-state"><p class="empty-state-desc">No data available in table</p></div></td>
+                </tr>
+              </template>
+              <template v-else>
+                <tr v-for="row in paymentRows" :key="row.payment_id" :class="{ 'row-selected': selectedPaymentIds.has(row.payment_id) }">
+                  <td class="col-icon">
+                    <input
+                      type="checkbox"
+                      :checked="selectedPaymentIds.has(row.payment_id)"
+                      @change="togglePaymentRow(row.payment_id)"
+                      :aria-label="`Select payment ${row.payment_id}`"
+                    />
+                  </td>
+                  <td>{{ fmtDate(row.paid_on) }}</td>
+                  <td>{{ row.payment_type?.name || '—' }}</td>
+                  <td>{{ row.payment_method?.name || '—' }}</td>
+                  <td>{{ row.payment_refer || '—' }}</td>
+                  <td>
+                    <strong :style="row.payment_refund ? 'color:#dc3545' : ''">
+                      {{ row.payment_refund ? '-' : '' }}£{{ Number(row.paid_amount || 0).toFixed(2) }}
+                    </strong>
+                    <span v-if="row.payment_refund" style="margin-left:6px;font-size:11px;background:#dc3545;color:#fff;border-radius:3px;padding:1px 5px;">REFUND</span>
+                  </td>
+                  <td>
+                    <button class="btn-table-action" @click="editPayment(row)" title="Edit">✏️</button>
+                  </td>
+                </tr>
+              </template>
             </tbody>
           </table>
         </div>
         <div class="pagination">
-          <span class="page-meta">Showing 0 to 0 of 0 entries</span>
-          <button class="page-btn" disabled>‹ Previous</button>
-          <button class="page-btn" disabled>Next ›</button>
+          <span class="page-meta">Showing {{ paymentRows.length }} of {{ paymentRows.length }} entries</span>
         </div>
       </div>
 
       <!-- APPEAL -->
       <div v-show="activeTab === 'appeal'">
         <div class="card-inline mb-lg">
-          <button class="btn-action-light" @click="startAppeal">START APPEAL</button>
+          <button
+            class="btn-action-light"
+            :disabled="hasUndecidedAppeal"
+            :title="hasUndecidedAppeal ? 'Resolve the existing pending appeal before starting a new one' : ''"
+            @click="startAppeal"
+          >START APPEAL</button>
         </div>
         <div class="toolbar">
           <div class="flex items-center gap-sm">
-            <select v-model="perPage" class="rows-select">
+            <select v-model="appealPerPage" class="rows-select" @change="appealCurrentPage = 1">
               <option :value="5">5</option>
               <option :value="10">10</option>
             </select>
@@ -905,28 +946,70 @@
               </tr>
             </thead>
             <tbody>
-              <tr>
-                <td colspan="11"><div class="empty-state"><p class="empty-state-desc">No data available in table</p></div></td>
+              <tr v-if="appealLoading">
+                <td colspan="11" style="text-align:center;padding:16px;">Loading…</td>
+              </tr>
+              <tr v-else-if="appealRows.length === 0">
+                <td colspan="11"><div class="empty-state"><p class="empty-state-desc">No appeal records.</p></div></td>
+              </tr>
+              <tr v-for="row in appealPagedRows" :key="row.appeal_id">
+                <td>{{ fmtDate(row.appeal_date) || '—' }}</td>
+                <td style="max-width:180px;white-space:pre-wrap;word-break:break-word;">{{ row.appeal_reason || '—' }}</td>
+                <td>{{ fmtDate(row.decline_date) || '—' }}</td>
+                <td style="max-width:180px;white-space:pre-wrap;word-break:break-word;">{{ row.decline_reason || '—' }}</td>
+                <td>{{ fmtDate(row.reopen_appeal_date) || '—' }}</td>
+                <td style="max-width:180px;white-space:pre-wrap;word-break:break-word;">{{ row.reopen_appeal_desc || '—' }}</td>
+                <td>{{ fmtDate(row.accepted_date) || '—' }}</td>
+                <td style="max-width:180px;white-space:pre-wrap;word-break:break-word;">{{ row.accepted_reason || '—' }}</td>
+                <td>
+                  <a v-if="row.attachment_id" href="#" @click.prevent="downloadAppealAttachment(row)" class="link-action">Download</a>
+                  <span v-else>—</span>
+                </td>
+                <td style="white-space:nowrap;min-width:120px">
+                  <!-- Accepted — badge only, no buttons -->
+                  <template v-if="row.accepted_date">
+                    <span style="display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:#d1fae5;color:#065f46;">Accepted</span>
+                  </template>
+                  <!-- Declined — badge + optional Reopen button -->
+                  <template v-else-if="row.decline_date && !row.reopen_appeal_date">
+                    <span style="display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:#fee2e2;color:#991b1b;margin-bottom:4px;">Declined</span>
+                    <template v-if="(row.decline_reason || '').toLowerCase().includes('incomplete')">
+                      <br>
+                      <button class="btn-action-light" style="font-size:11px;padding:3px 8px;margin-top:4px" @click="reopenAppeal(row)">REOPEN</button>
+                    </template>
+                  </template>
+                  <!-- Pending or Reopened — active Decline/Accept buttons -->
+                  <template v-else>
+                    <span v-if="row.reopen_appeal_date" style="display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:#dbeafe;color:#1e40af;margin-bottom:4px;">Reopened</span>
+                    <span v-else style="display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:10px;background:#fef3c7;color:#92400e;margin-bottom:4px;">Pending</span>
+                    <br>
+                    <button class="btn-action-red"   style="font-size:11px;padding:3px 8px;margin-right:4px;margin-top:4px" @click="declineAppeal(row)">DECLINE</button>
+                    <button class="btn-action-green" style="font-size:11px;padding:3px 8px;margin-top:4px"               @click="acceptAppeal(row)">ACCEPT</button>
+                  </template>
+                </td>
+                <td>
+                  <button class="btn-action-light" style="font-size:11px;padding:3px 8px" @click="printAppeal(row)">Print</button>
+                </td>
               </tr>
             </tbody>
           </table>
         </div>
         <div class="pagination">
-          <span class="page-meta">Showing 0 to 0 of 0 entries</span>
-          <button class="page-btn" disabled>‹ Previous</button>
-          <button class="page-btn" disabled>Next ›</button>
+          <span class="page-meta">Showing {{ appealShowingFrom }} to {{ appealShowingTo }} of {{ appealRows.length }} entries</span>
+          <button class="page-btn" :disabled="appealCurrentPage <= 1" @click="appealCurrentPage--">‹ Previous</button>
+          <button class="page-btn" :disabled="appealCurrentPage >= appealTotalPages" @click="appealCurrentPage++">Next ›</button>
         </div>
       </div>
 
       <!-- NOTES -->
       <div v-show="activeTab === 'notes'">
         <div class="flex gap-sm" style="justify-content: flex-end; margin-bottom: 12px">
-          <button class="btn-action-light" @click="printAllNotes">PRINT ALL NOTES</button>
+          <button class="btn-action-light" :disabled="notes.length === 0" @click="printAllNotes">PRINT ALL NOTES</button>
           <button class="btn-action-light" @click="addNote">ADD</button>
         </div>
         <div class="toolbar">
           <div class="flex items-center gap-sm">
-            <select v-model="perPage" class="rows-select">
+            <select v-model="notesPerPage" class="rows-select" @change="notesCurrentPage = 1">
               <option :value="5">5</option>
               <option :value="10">10</option>
             </select>
@@ -943,61 +1026,85 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="n in notes" :key="n.id">
-                <td>{{ n.datetime }}</td>
-                <td>{{ n.author }}</td>
-                <td>{{ n.note }}</td>
+              <tr v-if="notes.length === 0">
+                <td colspan="3"><div class="empty-state"><p class="empty-state-desc">No notes recorded.</p></div></td>
+              </tr>
+              <tr v-for="n in notesPagedRows" :key="n.id">
+                <td style="white-space:nowrap">{{ n.datetime }}</td>
+                <td style="white-space:nowrap">{{ n.author }}</td>
+                <td style="white-space:pre-wrap;word-break:break-word;">{{ n.note }}</td>
               </tr>
             </tbody>
           </table>
         </div>
         <div class="pagination">
-          <span class="page-meta">Showing 1 to {{ notes.length }} of {{ notes.length }} entries</span>
-          <button class="page-btn" disabled>‹ Previous</button>
-          <button class="page-btn active">1</button>
-          <button class="page-btn" disabled>Next ›</button>
+          <span class="page-meta">Showing {{ notesShowingFrom }} to {{ notesShowingTo }} of {{ notes.length }} entries</span>
+          <button class="page-btn" :disabled="notesCurrentPage <= 1" @click="notesCurrentPage--">‹ Previous</button>
+          <button class="page-btn" :disabled="notesCurrentPage >= notesTotalPages" @click="notesCurrentPage++">Next ›</button>
         </div>
       </div>
 
       <!-- ATTACHMENTS -->
       <div v-show="activeTab === 'attachments'">
         <div class="flex gap-sm" style="margin-bottom: 12px">
-          <button class="btn-action-light" :disabled="selectedAttachments.length === 0" @click="openAttach">OPEN ATTACH</button>
+          <button class="btn-action-light" :disabled="selectedAttachments.length !== 1" @click="openAttach">OPEN ATTACH</button>
           <button class="btn-action-green" @click="addAttach">ADD ATTACH</button>
-          <button class="btn-action-red" :disabled="selectedAttachments.length === 0" @click="deleteAttach">DELETE ATTACH</button>
+          <button class="btn-action-red"   :disabled="selectedAttachments.length === 0" @click="deleteAttach">DELETE ATTACH</button>
+        </div>
+        <div class="toolbar">
+          <div class="flex items-center gap-sm">
+            <select v-model="attachPerPage" class="rows-select" @change="attachCurrentPage = 1">
+              <option :value="5">5</option>
+              <option :value="10">10</option>
+            </select>
+            <span class="toolbar-text">records per page</span>
+          </div>
         </div>
         <div class="table-wrap">
           <table>
             <thead>
               <tr>
-                <th class="col-icon"><input type="checkbox" aria-label="Select all attachments" /></th>
-                <th>Date&amp;time</th>
+                <th class="col-icon">
+                  <input type="checkbox" aria-label="Select all attachments"
+                    :checked="allAttachmentsSelected" @change="toggleAllAttachments" />
+                </th>
+                <th>Date &amp; Time</th>
                 <th>Uploader</th>
                 <th>Filename</th>
-                <th>Size</th>
+                <th>Size (KB)</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="a in attachments" :key="a.id">
+              <tr v-if="attachments.length === 0">
+                <td colspan="5"><div class="empty-state"><p class="empty-state-desc">No attachments uploaded.</p></div></td>
+              </tr>
+              <tr v-for="a in attachPagedRows" :key="a.id">
                 <td class="col-icon"><input type="checkbox" :checked="selectedAttachments.includes(a.id)" @change="toggleAttachment(a.id)" /></td>
-                <td>{{ a.datetime }}</td>
+                <td style="white-space:nowrap">{{ fmtDateTime(a.datetime) }}</td>
                 <td>{{ a.uploader }}</td>
-                <td>{{ a.filename }}</td>
+                <td>
+                  <a href="#" class="link-action" @click.prevent="openSingleAttach(a)">{{ a.filename }}</a>
+                </td>
                 <td>{{ a.size }}</td>
               </tr>
             </tbody>
           </table>
+        </div>
+        <div class="pagination">
+          <span class="page-meta">Showing {{ attachShowingFrom }} to {{ attachShowingTo }} of {{ attachments.length }} entries</span>
+          <button class="page-btn" :disabled="attachCurrentPage <= 1" @click="attachCurrentPage--">‹ Previous</button>
+          <button class="page-btn" :disabled="attachCurrentPage >= attachTotalPages" @click="attachCurrentPage++">Next ›</button>
         </div>
       </div>
 
       <!-- AUDIT -->
       <div v-show="activeTab === 'audit'">
         <div class="flex mb-md">
-          <button class="btn-action-green" @click="exportExcel('audit')">EXPORT EXCEL</button>
+          <button class="btn-action-green" :disabled="auditLog.length === 0" @click="exportExcel('audit')">EXPORT EXCEL</button>
         </div>
         <div class="toolbar">
           <div class="flex items-center gap-sm">
-            <select v-model="perPage" class="rows-select">
+            <select v-model="auditPerPage" class="rows-select" @change="auditCurrentPage = 1">
               <option :value="25">25</option>
               <option :value="50">50</option>
               <option :value="100">100</option>
@@ -1020,7 +1127,10 @@
               </tr>
             </thead>
             <tbody>
-              <tr v-for="row in auditLog" :key="row.id">
+              <tr v-if="auditLog.length === 0">
+                <td colspan="3"><div class="empty-state"><p class="empty-state-desc">No audit records found.</p></div></td>
+              </tr>
+              <tr v-for="row in auditPagedRows" :key="row.id">
                 <td>{{ row.datetime }}</td>
                 <td>{{ row.user }}</td>
                 <td>{{ row.description }}</td>
@@ -1028,20 +1138,30 @@
             </tbody>
           </table>
         </div>
+        <div class="pagination">
+          <span class="page-meta">Showing {{ auditShowingFrom }} to {{ auditShowingTo }} of {{ auditLog.length }} entries</span>
+          <button class="page-btn" :disabled="auditCurrentPage <= 1" @click="auditCurrentPage--">‹ Previous</button>
+          <button class="page-btn" :disabled="auditCurrentPage >= auditTotalPages" @click="auditCurrentPage++">Next ›</button>
+        </div>
       </div>
 
       <!-- EMAIL -->
       <div v-show="activeTab === 'email'">
         <div class="flex gap-sm" style="margin-bottom: 12px">
-          <button class="btn-action-light" @click="openEmail">OPEN EMAIL</button>
-          <button class="btn-action-light" @click="previewEmail">PREVIEW EMAIL</button>
-          <button class="btn-action-light" @click="addEmail">ADD EMAIL</button>
+          <button class="btn-action-light" :disabled="!emailSelected || emailsLoading" @click="openEmail">OPEN EMAIL</button>
+          <button class="btn-action-light" :disabled="!emailSelected || emailsLoading" @click="previewEmail">PREVIEW EMAIL</button>
+          <button class="btn-action-light" :disabled="emailsLoading" @click="addEmail">ADD EMAIL</button>
+          <button class="btn-action-light btn-action-danger" :disabled="!emailSelected || emailsLoading" @click="deleteEmail">DELETE</button>
+        </div>
+        <div v-if="emailsError" class="error-banner" style="margin:8px 0;padding:8px 12px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:4px;font-size:0.875rem">
+          {{ emailsError }}
         </div>
         <div class="toolbar">
           <div class="flex items-center gap-sm">
-            <select v-model="perPage" class="rows-select">
+            <select v-model.number="emailsPerPage" class="rows-select" @change="emailsCurrentPage = 1">
               <option :value="5">5</option>
               <option :value="10">10</option>
+              <option :value="25">25</option>
             </select>
             <span class="toolbar-text">records per page</span>
           </div>
@@ -1050,26 +1170,80 @@
           <table>
             <thead>
               <tr>
-                <th class="col-icon"><input type="checkbox" aria-label="Select all emails" /></th>
+                <th class="col-icon"></th>
                 <th>Title</th>
                 <th>Status</th>
                 <th>Created</th>
                 <th>Edited</th>
-                <th>Sent</th>
+                <th>Scheduled Send</th>
                 <th>Created By</th>
                 <th>Edited By</th>
-                <th>Action</th>
               </tr>
             </thead>
             <tbody>
-              <tr><td colspan="9"><div class="empty-state"><p class="empty-state-desc">No data available in table</p></div></td></tr>
+              <tr v-if="!emailsLoading && emailRows.length === 0">
+                <td colspan="8"><div class="empty-state"><p class="empty-state-desc">No emails added to this case yet.</p></div></td>
+              </tr>
+              <tr v-for="row in emailPagedRows" :key="row.comm_id"
+                  :class="{ 'row-selected': selectedEmailCommId === row.comm_id }"
+                  @click="toggleEmailRow(row.comm_id)">
+                <td class="col-icon">
+                  <input type="checkbox"
+                         :checked="selectedEmailCommId === row.comm_id"
+                         @change="toggleEmailRow(row.comm_id)"
+                         @click.stop />
+                </td>
+                <td>{{ row.title || '—' }}</td>
+                <td>
+                  <span class="badge" :class="emailStatusClass(row.status_name)">
+                    {{ row.status_name || '—' }}
+                  </span>
+                </td>
+                <td style="white-space:nowrap">{{ fmtDateTime(row.created_dt) }}</td>
+                <td style="white-space:nowrap">{{ fmtDateTime(row.updated_dt) || '—' }}</td>
+                <td style="white-space:nowrap">{{ fmtDateTime(row.email_send_dt) || '—' }}</td>
+                <td>{{ row.created_by_name || row.created_by || '—' }}</td>
+                <td>{{ row.updated_by_name || row.updated_by || '—' }}</td>
+              </tr>
             </tbody>
           </table>
         </div>
         <div class="pagination">
-          <span class="page-meta">Showing 0 to 0 of 0 entries</span>
-          <button class="page-btn" disabled>‹ Previous</button>
-          <button class="page-btn" disabled>Next ›</button>
+          <span class="page-meta">Showing {{ emailsShowingFrom }} to {{ emailsShowingTo }} of {{ emailRows.length }} entries</span>
+          <button class="page-btn" :disabled="emailsCurrentPage <= 1" @click="emailsCurrentPage--">‹ Previous</button>
+          <button class="page-btn" :disabled="emailsCurrentPage >= emailsTotalPages" @click="emailsCurrentPage++">Next ›</button>
+        </div>
+      </div>
+
+      <!-- ADD EMAIL modal -->
+      <div v-if="emailModal.open" class="modal-backdrop" @click.self="closeEmailModal" style="position:fixed;inset:0;background:rgba(15,23,42,0.45);display:flex;align-items:center;justify-content:center;z-index:1000">
+        <div class="modal-card" style="background:#fff;border-radius:6px;width:440px;max-width:92vw;box-shadow:0 10px 25px rgba(0,0,0,0.2);display:flex;flex-direction:column">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid #e5e7eb">
+            <h3 style="margin:0;font-size:1rem">Add Email</h3>
+            <button @click="closeEmailModal" style="border:none;background:transparent;font-size:1.5rem;line-height:1;cursor:pointer;color:#6b7280">×</button>
+          </div>
+          <div style="padding:16px 18px">
+            <div class="form-group">
+              <label class="form-label">Email template *</label>
+              <select v-model="emailModal.templateId" style="width:100%">
+                <option value="">Select a template…</option>
+                <option v-for="t in emailTemplateOptions" :key="t.email_template_id" :value="t.email_template_id">
+                  {{ t.title }}
+                </option>
+              </select>
+            </div>
+            <div v-if="emailModal.error" class="error-banner" style="margin-top:8px;padding:8px 12px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:4px;font-size:0.875rem">
+              {{ emailModal.error }}
+            </div>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid #e5e7eb;background:#f9fafb">
+            <button class="btn btn-secondary" @click="closeEmailModal" :disabled="emailModal.saving">Cancel</button>
+            <button class="btn btn-primary"
+                    :disabled="emailModal.saving || !emailModal.templateId"
+                    @click="submitEmailModal">
+              {{ emailModal.saving ? 'Adding…' : 'Add Email' }}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1660,6 +1834,151 @@
         </div>
       </div>
     </div>
+    <!-- ── Add Attachment modal ────────────────────────────────────────────── -->
+    <div v-if="attachModalOpen" class="modal-backdrop">
+      <div class="modal-panel" role="dialog" aria-modal="true" style="max-width:460px;width:92%">
+        <div class="modal-head">
+          <h2 class="modal-title">Add Attachment</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="attachModalOpen = false">×</button>
+        </div>
+        <div class="modal-body" style="padding:16px 20px;display:grid;gap:12px;">
+          <div class="form-group">
+            <label class="form-label">Select File *</label>
+            <input ref="attachFileRef" type="file" @change="e => attachSelectedFile = e.target.files[0]"
+              style="display:block;width:100%;padding:6px;border:1px solid #d1d5db;border-radius:6px;" />
+          </div>
+          <p v-if="attachSelectedFile" style="font-size:12px;color:#6b7280;margin:0;">
+            {{ attachSelectedFile.name }} ({{ Math.round(attachSelectedFile.size / 1024) }} KB)
+          </p>
+          <div v-if="attachModalError" class="form-error" style="color:#b91c1c;font-size:12px;">{{ attachModalError }}</div>
+        </div>
+        <div class="modal-foot" style="padding:12px 20px;display:flex;justify-content:flex-end;gap:8px;">
+          <button type="button" class="btn-action-red"   @click="attachModalOpen = false" :disabled="attachModalSaving">CANCEL</button>
+          <button type="button" class="btn-action-green" @click="submitAttach"            :disabled="attachModalSaving">
+            {{ attachModalSaving ? 'UPLOADING…' : 'UPLOAD' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- REGISTER PAYMENT modal — mirrors legacy PaymentDetailSave fuseaction.
+         Supports both new payment (no payment_id) and edit (payment_id set).
+         On save, recalculates case amount_paid / amount_due via the backend
+         and updates the summary row live. -->
+    <div v-if="paymentModalOpen" class="modal-backdrop">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="payment-modal-title" style="max-width:520px;width:92%">
+        <div class="modal-head">
+          <h2 id="payment-modal-title" class="modal-title">{{ paymentForm.paymentId ? 'Edit Payment' : 'Register Payment' }}</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="closePaymentModal">×</button>
+        </div>
+        <div class="modal-body" style="padding:16px 20px;display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;">
+          <!-- Date Taken -->
+          <div class="form-group" style="grid-column:1/2">
+            <label class="form-label">Date Taken *</label>
+            <input v-model="paymentForm.paidOn" type="date" />
+          </div>
+          <!-- Amount -->
+          <div class="form-group" style="grid-column:2/3">
+            <label class="form-label">Amount (£) *</label>
+            <div class="input-currency">
+              <span class="prefix">£</span>
+              <input v-model.number="paymentForm.amtPaid" type="number" min="0" step="0.01" class="has-currency" placeholder="0.00" />
+            </div>
+          </div>
+          <!-- Payment Type -->
+          <div class="form-group" style="grid-column:1/2">
+            <label class="form-label">Payment Type</label>
+            <select v-model="paymentForm.payType">
+              <option value="">— Select —</option>
+              <option v-for="o in paymentTypeOptions" :key="o.lookup_data_id" :value="o.lookup_data_id">{{ o.lookup_data_value }}</option>
+            </select>
+          </div>
+          <!-- Payment Method -->
+          <div class="form-group" style="grid-column:2/3">
+            <label class="form-label">Payment Method</label>
+            <select v-model="paymentForm.payMethod">
+              <option value="">— Select —</option>
+              <option v-for="o in paymentMethodOptions" :key="o.lookup_data_id" :value="o.lookup_data_id">{{ o.lookup_data_value }}</option>
+            </select>
+          </div>
+          <!-- Reference -->
+          <div class="form-group" style="grid-column:1/2">
+            <label class="form-label">Reference</label>
+            <input v-model="paymentForm.payRef" type="text" maxlength="45" placeholder="Payment reference" />
+          </div>
+          <!-- Refund checkbox -->
+          <div class="form-group" style="grid-column:2/3;display:flex;align-items:center;gap:8px;padding-top:22px">
+            <input id="refund-check" v-model="paymentForm.isRefund" type="checkbox" />
+            <label for="refund-check" class="form-label" style="margin:0;cursor:pointer">Refund</label>
+          </div>
+          <!-- Error -->
+          <div v-if="paymentModalError" class="form-error" style="grid-column:1/3;color:#b91c1c;font-size:12px;margin-top:4px;">
+            {{ paymentModalError }}
+          </div>
+        </div>
+        <div class="modal-foot" style="padding:12px 20px;display:flex;justify-content:flex-end;gap:8px;">
+          <button type="button" class="btn-action-red"   @click="closePaymentModal"  :disabled="paymentModalSaving">CANCEL</button>
+          <button type="button" class="btn-action-green" @click="submitPaymentModal" :disabled="paymentModalSaving">
+            {{ paymentModalSaving ? 'SAVING…' : 'SAVE' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Appeal Modal (Start / Decline / Accept / Reopen) ────────────────── -->
+    <div v-if="appealModalOpen" class="modal-backdrop">
+      <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="appeal-modal-title" style="max-width:520px;width:92%">
+        <div class="modal-head">
+          <h2 id="appeal-modal-title" class="modal-title">{{ appealForm.action }}</h2>
+          <button type="button" class="modal-close" aria-label="Close" @click="closeAppealModal">×</button>
+        </div>
+        <div class="modal-body" style="padding:16px 20px;display:grid;gap:12px 16px;">
+          <!-- Date -->
+          <div class="form-group">
+            <label class="form-label">
+              {{
+                appealForm.action === 'Start Appeal'   ? 'Appeal Date *' :
+                appealForm.action === 'Decline Appeal' ? 'Decline Date *' :
+                appealForm.action === 'Accept Appeal'  ? 'Acceptance Date *' :
+                                                         'Reopen Date *'
+              }}
+            </label>
+            <input v-model="appealForm.actionDate" type="date" />
+          </div>
+          <!-- Reason -->
+          <div class="form-group">
+            <label class="form-label">
+              {{
+                appealForm.action === 'Start Appeal'   ? 'Appeal Reason' :
+                appealForm.action === 'Decline Appeal' ? 'Decline Reason *' :
+                appealForm.action === 'Accept Appeal'  ? 'Accepted Reason *' :
+                                                         'Reopen Reason *'
+              }}
+            </label>
+            <textarea v-model="appealForm.reason" rows="4" style="width:100%;resize:vertical;" maxlength="5000"></textarea>
+          </div>
+          <!-- Case Status (for Decline / Accept / Reopen — not shown for Start Appeal) -->
+          <div v-if="appealForm.action !== 'Start Appeal'" class="form-group">
+            <label class="form-label">New Case Status</label>
+            <select v-model="appealForm.caseStatusId" style="width:100%">
+              <option value="">— Keep current status —</option>
+              <option v-for="s in statusOptions" :key="s.case_status_id" :value="s.case_status_id">{{ s.status_desc }}</option>
+            </select>
+          </div>
+          <!-- Error -->
+          <div v-if="appealModalError" class="form-error" style="color:#b91c1c;font-size:12px;margin-top:2px;">
+            {{ appealModalError }}
+          </div>
+        </div>
+        <div class="modal-foot" style="padding:12px 20px;display:flex;justify-content:flex-end;gap:8px;">
+          <button type="button" class="btn-action-red"   @click="closeAppealModal"  :disabled="appealModalSaving">CANCEL</button>
+          <button type="button" class="btn-action-green" @click="submitAppealModal" :disabled="appealModalSaving">
+            {{ appealModalSaving ? 'SAVING…' : 'SAVE' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <DescriptionModal
       v-model="descModalOpen"
       :is-read-only="!isEditMode"
@@ -1698,7 +2017,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, watch, watchEffect, onMounted } from 'vue'
+import { ref, reactive, computed, watch, watchEffect, onMounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Swal from 'sweetalert2'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -1713,8 +2032,10 @@ import { carParksService }  from '@/services/car-parks.service.js'
 import { actionsService }        from '@/services/actions.service.js'
 import { courtsService }    from '@/services/courts.service.js'
 import { paymentsService }  from '@/services/payments.service.js'
+import { appealsService }   from '@/services/appeals.service.js'
 import { addressesService } from '@/services/addresses.service.js'
 import { caseLettersService } from '@/services/case-letters.service.js'
+import { caseEmailsService }  from '@/services/case-emails.service.js'
 import AddressReferenceModal from '@/components/AddressReferenceModal.vue'
 import OffenderSearchModal   from '@/components/OffenderSearchModal.vue'
 import DescriptionModal      from '@/components/DescriptionModal.vue'
@@ -1724,14 +2045,23 @@ const router = useRouter()
 const headerOpen = ref(true)
 const activeTab = ref('actions')
 
-// Auto-fetch tab-scoped data when the operator clicks into it. Letters tab
-// fires `loadCaseLetters()` the first time it's opened and never re-fetches
-// implicitly — explicit refresh is via the toolbar refresh button.
+// Auto-fetch tab-scoped data when the operator clicks into it. Letters and
+// Emails tabs fire their loaders the first time they're opened.
 let _lettersLoadedOnce = false
+let _emailsLoadedOnce  = false
+let _appealsLoadedOnce = false
 watch(activeTab, async (tab) => {
   if (tab === 'letters' && !_lettersLoadedOnce) {
     _lettersLoadedOnce = true
     await loadCaseLetters()
+  }
+  if (tab === 'email' && !_emailsLoadedOnce) {
+    _emailsLoadedOnce = true
+    await loadCaseEmails()
+  }
+  if (tab === 'appeal' && !_appealsLoadedOnce) {
+    _appealsLoadedOnce = true
+    await _loadAppeals(route.params.caseid)
   }
 })
 
@@ -2786,12 +3116,17 @@ async function loadCase() {
     }
     if (payResult.status === 'fulfilled' && payResult.value) {
       const rows = payResult.value.results ?? payResult.value ?? []
-      const totalPaid = rows.reduce((sum, r) => sum + (Number(r.paid_amount) || 0), 0)
+      paymentRows.value = rows
+      selectedPaymentIds.clear()
+      const totalPaid = rows.reduce((sum, r) => sum + (r.payment_refund ? -1 : 1) * (Number(r.paid_amount) || 0), 0)
       payment.paid          = totalPaid.toFixed(2)
       // amount_due lives on the case row itself (set on the case header above).
       const due = Number(c.amount_due || 0)
       payment.amountDue     = due ? due.toFixed(2) : ''
       payment.outstanding   = (due ? (due - totalPaid) : 0).toFixed(2)
+      // outstanding_fare is the fare amount after any discount applied to the case.
+      const fare = Number(c.outstanding_fare || 0)
+      payment.discounted    = fare ? fare.toFixed(2) : ''
     }
     if (notesResult.status === 'fulfilled' && Array.isArray(notesResult.value)) {
       notes.value = notesResult.value.map(n => ({
@@ -3045,6 +3380,72 @@ const payment = reactive({
   amountDue: '', paid: '', outstanding: '', discounted: '',
 })
 
+// Payment table rows (active, non-deleted payments for this case).
+const paymentRows        = ref([])
+const paymentLoading     = ref(false)
+// Checkbox selection — Set of payment_id strings.
+const selectedPaymentIds = reactive(new Set())
+
+// Register/Edit payment modal state.
+const paymentModalOpen   = ref(false)
+const paymentModalSaving = ref(false)
+const paymentModalError  = ref('')
+const paymentForm        = reactive({
+  paymentId:        null,   // null → new; string → edit existing
+  paidOn:           '',
+  amtPaid:          '',
+  payType:          '',
+  payMethod:        '',
+  payRef:           '',
+  isRefund:         false,
+  _originalAmtPaid:  0,     // original row amount — used for edit overpayment check
+  _originalIsRefund: false, // original refund flag — used for edit overpayment check
+})
+
+// Lookup options loaded once per case detail page open.
+const paymentTypeOptions   = ref([])
+const paymentMethodOptions = ref([])
+let _paymentLookupsLoaded  = false
+
+// ── Appeals tab state ─────────────────────────────────────────────────────────
+// appealRows: full list of revp_appeal_details rows for this case.
+const appealRows       = ref([])
+const appealLoading    = ref(false)
+
+// Single modal handles Start / Decline / Accept / Reopen via appealForm.action.
+const appealModalOpen   = ref(false)
+const appealModalSaving = ref(false)
+const appealModalError  = ref('')
+const appealForm        = reactive({
+  // 'Start Appeal' | 'Decline Appeal' | 'Accept Appeal' | 'Reopen Appeal'
+  action:          '',
+  appealId:        null,   // null for Start; existing appeal_id for others
+  actionDate:      '',     // appeal_date / decline_date / accepted_date / reopen_date
+  reason:          '',     // appeal_reason / decline_reason / accepted_reason / reopen_desc
+  caseStatusId:    '',     // optional new case status to apply on save
+})
+
+const appealPerPage       = ref(5)
+const appealCurrentPage   = ref(1)
+
+const hasUndecidedAppeal = computed(() =>
+  appealRows.value.some(r => !r.decline_date && !r.accepted_date)
+)
+
+const appealTotalPages = computed(() =>
+  Math.max(1, Math.ceil(appealRows.value.length / appealPerPage.value))
+)
+const appealShowingFrom = computed(() =>
+  appealRows.value.length === 0 ? 0 : (appealCurrentPage.value - 1) * appealPerPage.value + 1
+)
+const appealShowingTo = computed(() =>
+  Math.min(appealCurrentPage.value * appealPerPage.value, appealRows.value.length)
+)
+const appealPagedRows = computed(() => {
+  const start = (appealCurrentPage.value - 1) * appealPerPage.value
+  return appealRows.value.slice(start, start + appealPerPage.value)
+})
+
 const actions = ref([])
 // Raw action objects from the API — used by the Edit modal to pre-fill fields.
 const _actionsRaw = ref([])
@@ -3158,8 +3559,69 @@ function toggleAttachment(id) {
   const idx = selectedAttachments.value.indexOf(id)
   idx === -1 ? selectedAttachments.value.push(id) : selectedAttachments.value.splice(idx, 1)
 }
+const allAttachmentsSelected = computed(() =>
+  attachments.value.length > 0 && attachments.value.every(a => selectedAttachments.value.includes(a.id))
+)
+function toggleAllAttachments() {
+  if (allAttachmentsSelected.value) {
+    selectedAttachments.value = []
+  } else {
+    selectedAttachments.value = attachments.value.map(a => a.id)
+  }
+}
+
+// Attachments pagination
+const attachPerPage     = ref(5)
+const attachCurrentPage = ref(1)
+const attachTotalPages  = computed(() => Math.max(1, Math.ceil(attachments.value.length / attachPerPage.value)))
+const attachShowingFrom = computed(() => attachments.value.length === 0 ? 0 : (attachCurrentPage.value - 1) * attachPerPage.value + 1)
+const attachShowingTo   = computed(() => Math.min(attachCurrentPage.value * attachPerPage.value, attachments.value.length))
+const attachPagedRows   = computed(() => {
+  const start = (attachCurrentPage.value - 1) * attachPerPage.value
+  return attachments.value.slice(start, start + attachPerPage.value)
+})
+
+// Add Attachment modal
+const attachModalOpen    = ref(false)
+const attachModalSaving  = ref(false)
+const attachModalError   = ref('')
+const attachFileRef      = ref(null)
+const attachSelectedFile = ref(null)
+
+// Notes pagination (isolated from other tabs)
+const notesPerPage     = ref(5)
+const notesCurrentPage = ref(1)
+const notesTotalPages  = computed(() => Math.max(1, Math.ceil(notes.value.length / notesPerPage.value)))
+const notesShowingFrom = computed(() => notes.value.length === 0 ? 0 : (notesCurrentPage.value - 1) * notesPerPage.value + 1)
+const notesShowingTo   = computed(() => Math.min(notesCurrentPage.value * notesPerPage.value, notes.value.length))
+const notesPagedRows   = computed(() => {
+  const start = (notesCurrentPage.value - 1) * notesPerPage.value
+  return notes.value.slice(start, start + notesPerPage.value)
+})
 
 const auditLog = ref([])
+
+// Audit pagination + column sort (sortKey / sortDir are shared with the sort() / sortIcon() helpers)
+const auditPerPage     = ref(25)
+const auditCurrentPage = ref(1)
+const auditSortedRows  = computed(() => {
+  const rows = [...auditLog.value]
+  const dir  = sortDir.value === 'asc' ? 1 : -1
+  rows.sort((a, b) => {
+    const av = a[sortKey.value] ?? ''
+    const bv = b[sortKey.value] ?? ''
+    return av < bv ? -dir : av > bv ? dir : 0
+  })
+  return rows
+})
+const auditTotalPages  = computed(() => Math.max(1, Math.ceil(auditLog.value.length / auditPerPage.value)))
+const auditShowingFrom = computed(() => auditLog.value.length === 0 ? 0 : (auditCurrentPage.value - 1) * auditPerPage.value + 1)
+const auditShowingTo   = computed(() => Math.min(auditCurrentPage.value * auditPerPage.value, auditLog.value.length))
+const auditPagedRows   = computed(() => {
+  const start = (auditCurrentPage.value - 1) * auditPerPage.value
+  return auditSortedRows.value.slice(start, start + auditPerPage.value)
+})
+
 const linkedCases = ref([])
 
 // Add-Offence modal state — triggered from the Offences tab ADD button.
@@ -3213,8 +3675,8 @@ const tabs = computed(() => [
   { id: 'notes',       label: `NOTES (${notes.value.length})` },
   { id: 'attachments', label: `ATTACHMENTS (${attachments.value.length})` },
   { id: 'audit',       label: 'AUDIT' },
-  { id: 'email',       label: 'EMAIL' },
-  { id: 'letters',     label: 'LETTERS (0)' },
+  ...(customerForm.email ? [{ id: 'email', label: 'EMAIL' }] : []),
+  { id: 'letters',     label: `LETTERS (${letterRows.value.length})` },
   { id: 'linked',      label: `LINKED CASES (${linkedCases.value.length})` }
 ])
 
@@ -3396,12 +3858,32 @@ async function submitAddAction() {
 }
 
 async function exportExcel(section) {
-  if (section !== 'actions') return
-  try {
-    await actionsService.exportByCase(route.params.caseid)
-  } catch (e) {
-    actionError.value = e?.message || 'Export failed.'
-    setTimeout(() => { actionError.value = '' }, 4000)
+  if (section === 'actions') {
+    try {
+      await actionsService.exportByCase(route.params.caseid)
+    } catch (e) {
+      actionError.value = e?.message || 'Export failed.'
+      setTimeout(() => { actionError.value = '' }, 4000)
+    }
+    return
+  }
+
+  if (section === 'payments') {
+    try {
+      await paymentsService.exportByCase(route.params.caseid)
+    } catch (e) {
+      await Swal.fire({ icon: 'error', title: 'Export Failed', text: e?.message || 'Could not download payments export.' })
+    }
+    return
+  }
+
+  if (section === 'audit') {
+    try {
+      await casesService.exportAudit(route.params.caseid)
+    } catch (e) {
+      await Swal.fire({ icon: 'error', title: 'Export Failed', text: e?.message || 'Could not download audit export.' })
+    }
+    return
   }
 }
 function showDescription()           { /* TODO */ }
@@ -3746,10 +4228,407 @@ async function saveAdminOverride() {
     savingOverride.value = false
   }
 }
-function registerPayment()           { /* TODO */ }
-function deletePayment()             { /* TODO */ }
-function startAppeal()               { /* TODO */ }
-function printAllNotes()             { /* TODO */ }
+// ── Payment lookup helpers ────────────────────────────────────────────────────
+async function _loadPaymentLookups() {
+  if (_paymentLookupsLoaded) return
+  try {
+    const [types, methods] = await Promise.all([
+      lookupService.listByType('PAYMENT_TYPE'),
+      lookupService.listByType('PAYMENT_METHOD'),
+    ])
+    paymentTypeOptions.value   = Array.isArray(types)   ? types   : (types?.results   ?? [])
+    paymentMethodOptions.value = Array.isArray(methods) ? methods : (methods?.results ?? [])
+    _paymentLookupsLoaded = true
+  } catch {
+    // Dropdowns render empty — user can still enter a reference and amount.
+  }
+}
+
+// ── Payment table selection ───────────────────────────────────────────────────
+function togglePaymentRow(paymentId) {
+  if (selectedPaymentIds.has(paymentId)) selectedPaymentIds.delete(paymentId)
+  else                                   selectedPaymentIds.add(paymentId)
+}
+
+function toggleAllPayments() {
+  const allSelected = paymentRows.value.every(r => selectedPaymentIds.has(r.payment_id))
+  if (allSelected) {
+    paymentRows.value.forEach(r => selectedPaymentIds.delete(r.payment_id))
+  } else {
+    paymentRows.value.forEach(r => selectedPaymentIds.add(r.payment_id))
+  }
+}
+
+// ── Refresh payment list + summary after any write ────────────────────────────
+async function _refreshPayments(caseId, updatedAmounts) {
+  // updatedAmounts: { amount_paid, amount_due? } from the save/delete response.
+  // Re-fetch the full payment list so the table is accurate.
+  paymentLoading.value = true
+  try {
+    const data = await paymentsService.listByCase(caseId)
+    const rows = data?.results ?? (Array.isArray(data) ? data : [])
+    paymentRows.value = rows
+    selectedPaymentIds.clear()
+    const totalPaid = rows.reduce((sum, r) => sum + (r.payment_refund ? -1 : 1) * (Number(r.paid_amount) || 0), 0)
+    // Prefer backend-returned amount_paid (already correctly calculated); fall back to sum.
+    const paid = updatedAmounts?.amount_paid != null ? Number(updatedAmounts.amount_paid) : totalPaid
+    payment.paid      = paid.toFixed(2)
+    // Prefer backend-returned due; fall back to what was already displayed.
+    const due = updatedAmounts?.amount_due != null
+      ? Number(updatedAmounts.amount_due)
+      : Number(payment.amountDue || 0)
+    payment.amountDue   = due ? due.toFixed(2) : '0.00'
+    payment.outstanding = (due - paid).toFixed(2)
+  } catch {
+    // Non-fatal — summary may be stale but was already updated by the server response.
+  } finally {
+    paymentLoading.value = false
+  }
+}
+
+// ── Open modal ────────────────────────────────────────────────────────────────
+async function registerPayment() {
+  await _loadPaymentLookups()
+  paymentForm.paymentId = null
+  paymentForm.paidOn    = new Date().toISOString().slice(0, 10)
+  paymentForm.amtPaid   = ''
+  paymentForm.payType   = ''
+  paymentForm.payMethod = ''
+  paymentForm.payRef    = ''
+  paymentForm.isRefund  = false
+  paymentModalError.value  = ''
+  paymentModalSaving.value = false
+  paymentModalOpen.value   = true
+}
+
+async function editPayment(row) {
+  await _loadPaymentLookups()
+  paymentForm.paymentId        = row.payment_id
+  paymentForm.paidOn           = row.paid_on ? row.paid_on.slice(0, 10) : ''
+  paymentForm.amtPaid          = Number(row.paid_amount || 0)
+  paymentForm.payType          = row.payment_type?.id   || ''
+  paymentForm.payMethod        = row.payment_method?.id || ''
+  paymentForm.payRef           = row.payment_refer || ''
+  paymentForm.isRefund         = !!row.payment_refund
+  paymentForm._originalAmtPaid  = Number(row.paid_amount || 0)
+  paymentForm._originalIsRefund = !!row.payment_refund
+  paymentModalError.value  = ''
+  paymentModalSaving.value = false
+  paymentModalOpen.value   = true
+}
+
+function closePaymentModal() {
+  if (paymentModalSaving.value) return
+  paymentModalOpen.value = false
+}
+
+// ── Submit Register/Edit Payment ──────────────────────────────────────────────
+async function submitPaymentModal() {
+  paymentModalError.value = ''
+
+  // Client-side required-field check.
+  if (!paymentForm.paidOn) {
+    paymentModalError.value = 'Date Taken is required.'
+    return
+  }
+  const amtPaid = Number(paymentForm.amtPaid)
+  if (!paymentForm.amtPaid && paymentForm.amtPaid !== 0) {
+    paymentModalError.value = 'Amount is required.'
+    return
+  }
+  if (isNaN(amtPaid) || amtPaid < 0) {
+    paymentModalError.value = 'Amount must be a non-negative number.'
+    return
+  }
+
+  // Overpayment soft-warning — new non-refund payment.
+  // Warn whenever amtPaid exceeds what is still owed (outstanding ≤ 0 means fully
+  // paid or already overpaid, so ANY new payment amount triggers the warning).
+  if (!paymentForm.paymentId && !paymentForm.isRefund) {
+    const outstanding = Number(payment.outstanding || 0)
+    if (amtPaid > Math.max(0, outstanding)) {
+      const { isConfirmed } = await Swal.fire({
+        icon: 'warning',
+        title: 'Exceeds Outstanding Balance',
+        text: `This payment of £${amtPaid.toFixed(2)} exceeds the outstanding balance of £${outstanding.toFixed(2)}. Do you want to continue?`,
+        showCancelButton: true,
+        confirmButtonText: 'Yes, continue',
+        cancelButtonText: 'No, go back',
+        confirmButtonColor: '#dc3545',
+      })
+      if (!isConfirmed) return
+    }
+  }
+
+  // Overpayment soft-warning — editing a non-refund payment.
+  // Available balance = current outstanding + the original payment's contribution.
+  if (paymentForm.paymentId && !paymentForm.isRefund) {
+    const originalContrib = paymentForm._originalIsRefund
+      ? -(paymentForm._originalAmtPaid || 0)
+      :  (paymentForm._originalAmtPaid || 0)
+    const availableBalance = Number(payment.outstanding || 0) + originalContrib
+    if (amtPaid > Math.max(0, availableBalance)) {
+      const { isConfirmed } = await Swal.fire({
+        icon: 'warning',
+        title: 'Exceeds Outstanding Balance',
+        text: `This payment of £${amtPaid.toFixed(2)} exceeds the outstanding balance of £${availableBalance.toFixed(2)}. Do you want to continue?`,
+        showCancelButton: true,
+        confirmButtonText: 'Yes, continue',
+        cancelButtonText: 'No, go back',
+        confirmButtonColor: '#dc3545',
+      })
+      if (!isConfirmed) return
+    }
+  }
+
+  paymentModalSaving.value = true
+  const caseId = route.params.caseid
+  try {
+    const payload = {
+      case_id:    caseId,
+      paid_on:    paymentForm.paidOn,
+      amt_paid:   amtPaid,
+      refund:     paymentForm.isRefund ? 1 : 0,
+      pay_type:   paymentForm.payType   || null,
+      pay_method: paymentForm.payMethod || null,
+      pay_ref:    paymentForm.payRef    || null,
+    }
+    if (paymentForm.paymentId) payload.payment_id = paymentForm.paymentId
+
+    const result = await paymentsService.save(payload)
+    paymentModalOpen.value = false
+    await _refreshPayments(caseId, result)
+  } catch (err) {
+    paymentModalError.value =
+      err?.data?.detail ||
+      err?.data?.amt_paid?.[0] ||
+      err?.data?.paid_on?.[0] ||
+      err?.message ||
+      'Failed to save payment.'
+  } finally {
+    paymentModalSaving.value = false
+  }
+}
+
+// ── Delete selected payments ──────────────────────────────────────────────────
+async function deletePayment() {
+  const ids = [...selectedPaymentIds]
+  if (ids.length === 0) return
+
+  const confirmed = await Swal.fire({
+    icon:             'warning',
+    title:            'Delete Payment',
+    text:             `Delete ${ids.length} payment${ids.length > 1 ? 's' : ''}? This cannot be undone.`,
+    showCancelButton: true,
+    confirmButtonText: 'Delete',
+    confirmButtonColor: '#dc2626',
+  })
+  if (!confirmed.isConfirmed) return
+
+  const caseId = route.params.caseid
+  try {
+    const result = await paymentsService.bulkDelete({ case_id: caseId, payment_ids: ids })
+    await _refreshPayments(caseId, result)
+  } catch (err) {
+    await Swal.fire({
+      icon:  'error',
+      title: 'Delete Failed',
+      text:  err?.data?.detail || 'Could not delete the selected payment(s).',
+    })
+  }
+}
+// ── Appeal helpers ────────────────────────────────────────────────────────────
+
+async function _loadAppeals(caseId) {
+  appealLoading.value = true
+  try {
+    const data = await appealsService.listByCase(caseId)
+    appealRows.value = data?.results ?? (Array.isArray(data) ? data : [])
+    _appealsLoadedOnce = true
+  } catch {
+    appealRows.value = []
+  } finally {
+    appealLoading.value = false
+  }
+}
+
+async function _openAppealModal(action, appealId = null) {
+  await ensureStatusOptions()
+  appealForm.action        = action
+  appealForm.appealId      = appealId
+  appealForm.actionDate    = new Date().toISOString().slice(0, 10)
+  appealForm.reason        = ''
+  appealForm.caseStatusId  = ''
+  appealModalError.value   = ''
+  appealModalSaving.value  = false
+  appealModalOpen.value    = true
+}
+
+function closeAppealModal() {
+  appealModalOpen.value = false
+}
+
+function startAppeal() {
+  _openAppealModal('Start Appeal')
+}
+
+function declineAppeal(row) {
+  _openAppealModal('Decline Appeal', row.appeal_id)
+}
+
+function acceptAppeal(row) {
+  _openAppealModal('Accept Appeal', row.appeal_id)
+}
+
+function reopenAppeal(row) {
+  _openAppealModal('Reopen Appeal', row.appeal_id)
+}
+
+async function submitAppealModal() {
+  appealModalError.value = ''
+
+  if (!appealForm.actionDate) {
+    appealModalError.value = 'Date is required.'
+    return
+  }
+  const needsReason = appealForm.action !== 'Start Appeal'
+  if (needsReason && !(appealForm.reason || '').trim()) {
+    appealModalError.value = 'Reason is required.'
+    return
+  }
+
+  appealModalSaving.value = true
+  const caseId = route.params.caseid
+
+  try {
+    if (appealForm.action === 'Reopen Appeal') {
+      await appealsService.reopen({
+        case_id:        caseId,
+        appeal_id:      appealForm.appealId,
+        reopen_date:    appealForm.actionDate,
+        reopen_desc:    appealForm.reason,
+        case_status_id: appealForm.caseStatusId || undefined,
+      })
+    } else {
+      await appealsService.save({
+        case_id:              caseId,
+        appeal_action:        appealForm.action,
+        appeal_date:          appealForm.actionDate,
+        decision_reason:      appealForm.reason,
+        appeal_id_for_action: appealForm.appealId || undefined,
+        case_status_id:       appealForm.caseStatusId || undefined,
+      })
+    }
+    appealModalOpen.value  = false
+    _appealsLoadedOnce     = false  // force refresh
+    await _loadAppeals(caseId)
+    // Refresh the case header so the status badge updates immediately.
+    await loadCase()
+  } catch (err) {
+    appealModalError.value =
+      err?.data?.detail ||
+      err?.data?.appeal_action?.[0] ||
+      err?.data?.appeal_date?.[0] ||
+      err?.message ||
+      'Failed to save appeal.'
+  } finally {
+    appealModalSaving.value = false
+  }
+}
+
+function downloadAppealAttachment(row) { /* TODO: open attachment download endpoint for row.attachment_id */ }
+
+function printAppeal(row) {
+  const name       = caseDetails.customerName || '—'
+  const caseNum    = caseDetails.caseNumber   || '—'
+  const offenceDate = caseDetails.offenceDate  || '—'
+  const appealDate  = fmtDate(row.appeal_date)  || '—'
+
+  let appealDetailsHtml = `
+    <tr><td class="label">Appeal Reason:</td><td>${row.appeal_reason || '—'}</td></tr>`
+
+  if (row.decline_date) {
+    appealDetailsHtml += `
+    <tr><td class="label">Decline Date:</td><td>${fmtDate(row.decline_date)}</td></tr>
+    <tr><td class="label">Decline Reason:</td><td>${row.decline_reason || '—'}</td></tr>`
+  }
+  if (row.reopen_appeal_date) {
+    appealDetailsHtml += `
+    <tr><td class="label">Reopen Date:</td><td>${fmtDate(row.reopen_appeal_date)}</td></tr>
+    <tr><td class="label">Reopen Reason:</td><td>${row.reopen_appeal_desc || '—'}</td></tr>`
+  }
+  if (row.accepted_date) {
+    appealDetailsHtml += `
+    <tr><td class="label">Acceptance Date:</td><td>${fmtDate(row.accepted_date)}</td></tr>
+    <tr><td class="label">Acceptance Reason:</td><td>${row.accepted_reason || '—'}</td></tr>`
+  }
+
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Appeal Print</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 40px; color: #111; }
+    h2 { font-size: 22px; margin-bottom: 16px; }
+    table { border-collapse: collapse; margin-bottom: 24px; }
+    td { padding: 6px 12px 6px 0; vertical-align: top; font-size: 14px; }
+    td.label { font-weight: bold; min-width: 180px; }
+  </style>
+</head>
+<body>
+  <h2>Case Details:</h2>
+  <table>
+    <tr><td class="label">Name:</td><td>${name}</td></tr>
+    <tr><td class="label">Case Number:</td><td>${caseNum}</td></tr>
+    <tr><td class="label">Date of Offence:</td><td>${offenceDate}</td></tr>
+    <tr><td class="label">Date of Appeal:</td><td>${appealDate}</td></tr>
+  </table>
+  <h2>Appeal Details:</h2>
+  <table>${appealDetailsHtml}</table>
+</body>
+</html>`
+
+  const iframe = document.createElement('iframe')
+  iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:0;height:0;border:0'
+  document.body.appendChild(iframe)
+  iframe.contentDocument.open()
+  iframe.contentDocument.write(html)
+  iframe.contentDocument.close()
+  iframe.contentWindow.focus()
+  iframe.contentWindow.print()
+  setTimeout(() => document.body.removeChild(iframe), 1000)
+}
+
+function printAllNotes() {
+  const caseNum  = caseDetails.caseNumber   || '—'
+  const name     = caseDetails.customerName || '—'
+  const rows = notes.value.map(n => `
+    <tr>
+      <td style="white-space:nowrap;padding:6px 12px 6px 0;vertical-align:top;font-size:13px;">${n.datetime || '—'}</td>
+      <td style="white-space:nowrap;padding:6px 12px 6px 0;vertical-align:top;font-size:13px;">${n.author || '—'}</td>
+      <td style="padding:6px 0;vertical-align:top;font-size:13px;white-space:pre-wrap;">${n.note || ''}</td>
+    </tr>`).join('')
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Notes — ${caseNum}</title>
+  <style>body{font-family:Arial,sans-serif;margin:40px;color:#111}h2{font-size:20px;margin-bottom:8px}
+  p{margin:0 0 6px}table{border-collapse:collapse;width:100%}th{text-align:left;border-bottom:1px solid #ccc;padding:6px 12px 6px 0;font-size:13px}
+  </style></head><body>
+  <h2>Notes — Case ${caseNum}</h2>
+  <p style="font-size:13px;margin-bottom:16px;">Customer: ${name}</p>
+  <table><thead><tr><th>Date &amp; Time</th><th>Author</th><th>Note</th></tr></thead>
+  <tbody>${rows || '<tr><td colspan="3">No notes.</td></tr>'}</tbody></table>
+  </body></html>`
+  const iframe = document.createElement('iframe')
+  iframe.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:0;height:0;border:0'
+  document.body.appendChild(iframe)
+  iframe.contentDocument.open()
+  iframe.contentDocument.write(html)
+  iframe.contentDocument.close()
+  iframe.contentWindow.focus()
+  iframe.contentWindow.print()
+  setTimeout(() => document.body.removeChild(iframe), 1000)
+}
+
 function addNote() {
   noteText.value     = ''
   noteError.value    = ''
@@ -3793,16 +4672,216 @@ function openLinkedCase(row) {
     router.push({ name: 'case-details', params: { caseid: row.case_id } })
   }
 }
-function openAttach()                { /* TODO */ }
-function addAttach()                 { /* TODO */ }
-function deleteAttach()              { /* TODO */ }
-function openEmail()                 { /* TODO */ }
-function previewEmail()              { /* TODO */ }
-function addEmail()                  { /* TODO */ }
+function openAttach() {
+  const id = selectedAttachments.value[0]
+  if (!id) return
+  const a = attachments.value.find(x => x.id === id)
+  casesService.downloadAttachment(route.params.caseid, id, a?.filename || 'attachment')
+}
+
+function openSingleAttach(a) {
+  casesService.downloadAttachment(route.params.caseid, a.id, a.filename || 'attachment')
+}
+
+function addAttach() {
+  attachSelectedFile.value = null
+  attachModalError.value   = ''
+  attachModalSaving.value  = false
+  attachModalOpen.value    = true
+  // Reset the file input on next tick so re-opens clear the previous selection
+  nextTick(() => { if (attachFileRef.value) attachFileRef.value.value = '' })
+}
+
+async function submitAttach() {
+  if (!attachSelectedFile.value) {
+    attachModalError.value = 'Please select a file.'
+    return
+  }
+  attachModalSaving.value = true
+  attachModalError.value  = ''
+  try {
+    const result = await casesService.uploadAttachment(route.params.caseid, attachSelectedFile.value)
+    attachments.value.unshift({
+      id:       result.attachment_id,
+      datetime: result.created_dt,
+      uploader: result.author,
+      filename: result.filename,
+      size:     result.filesize_kb,
+    })
+    attachModalOpen.value = false
+    selectedAttachments.value = []
+  } catch (err) {
+    attachModalError.value = err?.data?.detail || err?.message || 'Upload failed.'
+  } finally {
+    attachModalSaving.value = false
+  }
+}
+
+async function deleteAttach() {
+  if (selectedAttachments.value.length === 0) return
+  const count = selectedAttachments.value.length
+  const confirmed = await Swal.fire({
+    title: 'Delete Attachment' + (count > 1 ? 's' : ''),
+    text:  `Delete ${count} attachment${count > 1 ? 's' : ''}? This cannot be undone.`,
+    icon:  'warning',
+    showCancelButton:  true,
+    confirmButtonText: 'Delete',
+    confirmButtonColor: '#dc2626',
+  })
+  if (!confirmed.isConfirmed) return
+
+  const caseId = route.params.caseid
+  for (const id of [...selectedAttachments.value]) {
+    try {
+      await casesService.deleteAttachment(caseId, id)
+      attachments.value = attachments.value.filter(a => a.id !== id)
+      selectedAttachments.value = selectedAttachments.value.filter(x => x !== id)
+    } catch { /* ignore individual failures — row stays visible */ }
+  }
+}
 // ── Letters tab ─────────────────────────────────────────────────────────
 //
 // Mirrors legacy Case Detail "Letters" tab:
 //   Title / Status / Copies / Created / Edited / Printed / Created By / Edited By
+// ─── EMAIL TAB STATE ──────────────────────────────────────────────────────────
+const emailRows            = ref([])
+const emailsLoading        = ref(false)
+const emailsError          = ref('')
+const selectedEmailCommId  = ref('')
+const emailTemplateOptions = ref([])
+const emailsPerPage        = ref(10)
+const emailsCurrentPage    = ref(1)
+
+const emailSelected    = computed(() => emailRows.value.some(r => r.comm_id === selectedEmailCommId.value))
+const emailsTotalPages  = computed(() => Math.max(1, Math.ceil(emailRows.value.length / emailsPerPage.value)))
+const emailsShowingFrom = computed(() => emailRows.value.length === 0 ? 0 : (emailsCurrentPage.value - 1) * emailsPerPage.value + 1)
+const emailsShowingTo   = computed(() => Math.min(emailsCurrentPage.value * emailsPerPage.value, emailRows.value.length))
+const emailPagedRows    = computed(() => {
+  const start = (emailsCurrentPage.value - 1) * emailsPerPage.value
+  return emailRows.value.slice(start, start + emailsPerPage.value)
+})
+
+watch([emailRows, emailsPerPage], () => { emailsCurrentPage.value = 1 })
+
+function toggleEmailRow(commId) {
+  selectedEmailCommId.value = selectedEmailCommId.value === commId ? '' : commId
+}
+
+function emailStatusClass(name) {
+  switch ((name || '').toUpperCase()) {
+    case 'PENDING':   return 'badge-warning'
+    case 'SENT':      return 'badge-success'
+    case 'DELIVERED': return 'badge-info'
+    case 'OPEN':      return 'badge-primary'
+    case 'BOUNCE':    return 'badge-danger'
+    default:          return 'badge-neutral'
+  }
+}
+
+async function loadCaseEmails() {
+  const caseId = route.params.caseid
+  if (!caseId) return
+  emailsLoading.value = true
+  emailsError.value   = ''
+  try {
+    emailRows.value = await caseEmailsService.list(caseId) || []
+    if (!emailRows.value.some(r => r.comm_id === selectedEmailCommId.value)) {
+      selectedEmailCommId.value = ''
+    }
+  } catch (e) {
+    console.error('[case-emails] list failed', e)
+    emailsError.value = e?.message || 'Failed to load emails.'
+    emailRows.value   = []
+  } finally {
+    emailsLoading.value = false
+  }
+}
+
+async function _ensureEmailTemplateOptions() {
+  if (emailTemplateOptions.value.length) return
+  try {
+    const data = await actionsService.emailTemplates() || []
+    emailTemplateOptions.value = Array.isArray(data) ? data : (data?.results ?? [])
+  } catch (e) {
+    console.error('[case-emails] template list failed', e)
+  }
+}
+
+const emailModal = reactive({
+  open:       false,
+  templateId: '',
+  saving:     false,
+  error:      '',
+})
+
+function closeEmailModal() {
+  if (emailModal.saving) return
+  emailModal.open = false
+}
+
+async function addEmail() {
+  emailModal.templateId = ''
+  emailModal.error      = ''
+  emailModal.saving     = false
+  emailModal.open       = true
+  await _ensureEmailTemplateOptions()
+}
+
+async function submitEmailModal() {
+  const caseId = route.params.caseid
+  if (!caseId || !emailModal.templateId) return
+  emailModal.saving = true
+  emailModal.error  = ''
+  try {
+    await caseEmailsService.add(caseId, emailModal.templateId)
+    emailModal.open = false
+    await loadCaseEmails()
+  } catch (e) {
+    console.error('[case-emails] add failed', e)
+    emailModal.error = e?.data?.detail || e?.message || 'Failed to add email.'
+  } finally {
+    emailModal.saving = false
+  }
+}
+
+async function deleteEmail() {
+  const row = emailRows.value.find(r => r.comm_id === selectedEmailCommId.value)
+  if (!row) return
+  const confirm = await Swal.fire({
+    icon:             'warning',
+    title:            'Delete Email?',
+    text:             `Remove "${row.title || 'this email'}" from the case?`,
+    showCancelButton: true,
+    confirmButtonText: 'Yes, delete',
+    confirmButtonColor: '#dc3545',
+  })
+  if (!confirm.isConfirmed) return
+  try {
+    await caseEmailsService.remove(route.params.caseid, row.comm_id)
+    selectedEmailCommId.value = ''
+    await loadCaseEmails()
+  } catch (e) {
+    await Swal.fire({ icon: 'error', title: 'Delete Failed', text: e?.data?.detail || e?.message || 'Could not delete email.' })
+  }
+}
+
+async function openEmail() {
+  await Swal.fire({
+    icon:  'info',
+    title: 'SendGrid Integration Pending',
+    text:  'Opening / rendering emails requires the SendGrid integration which has not been implemented yet.',
+  })
+}
+
+async function previewEmail() {
+  await Swal.fire({
+    icon:  'info',
+    title: 'SendGrid Integration Pending',
+    text:  'Previewing emails requires the SendGrid integration which has not been implemented yet.',
+  })
+}
+
+// ─── LETTERS TAB STATE ────────────────────────────────────────────────────────
 // Single-row selection drives OPEN / PREVIEW / EDIT / UPDATE STATUS.
 // ADD LETTER works without a selection (it adds a new letter to this case).
 const letterRows           = ref([])
