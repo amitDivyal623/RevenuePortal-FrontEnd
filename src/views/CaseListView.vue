@@ -317,10 +317,17 @@
           <p class="text-light" style="margin:0 0 12px 0">For <strong>{{ selectedIds.size }}</strong> selected case<span v-if="selectedIds.size !== 1">s</span>.</p>
           <div class="form-group">
             <label class="form-label">Letter template *</label>
-            <select v-model="letterModal.templateId">
-              <option value="">Select a template…</option>
+            <select v-model="letterModal.templateId" :disabled="letterModal.loadingTemplates">
+              <option value="">
+                {{ letterModal.loadingTemplates ? 'Loading templates…' : 'Select a template…' }}
+              </option>
               <option v-for="t in letterModal.templates" :key="t.letter_template_id" :value="t.letter_template_id">{{ t.title }}</option>
             </select>
+            <p v-if="!letterModal.loadingTemplates && letterModal.templates.length === 0"
+               class="text-light" style="font-size:0.8rem;margin:4px 0 0">
+              No letter template is valid for every case type you selected.
+              Tick cases of a single type, or ask an admin to map a template to this combination.
+            </p>
           </div>
           <div class="form-group">
             <label class="form-label">Copies</label>
@@ -406,7 +413,16 @@
           <template v-if="showClosureFields">
             <div class="form-group">
               <label class="form-label">Closure Reason *</label>
-              <input v-model="statusModal.closureReason" placeholder="e.g. Paid / Withdrawn / Time Expired" />
+              <select v-model="statusModal.closureReason">
+                <option value="">Closure Reason</option>
+                <option v-for="r in statusModal.closureReasons" :key="r.id" :value="r.value">
+                  {{ r.value }}
+                </option>
+              </select>
+              <p v-if="statusModal.closureReasons.length === 0" class="text-light"
+                 style="font-size:0.8rem;margin:4px 0 0">
+                No closure reasons in the lookup yet — ask an admin to seed NOTICE_CLOSURE_REASON.
+              </p>
             </div>
             <div class="form-group">
               <label class="form-label">Closure Notes</label>
@@ -837,23 +853,47 @@ function _ensureSelection() {
 
 // ── CREATE LETTER ──────────────────────────────────────────────────────
 const letterModal = reactive({
-  open: false, templateId: '', copies: 1, language: 'English', saving: false, error: '', templates: [],
+  open: false, templateId: '', copies: 1, language: 'English', saving: false, error: '',
+  templates: [],
+  loadingTemplates: false,
+  // Tracks the case_type_ids that the currently-cached `templates` was
+  // fetched for. We re-fetch when the operator opens the modal with a
+  // different mix of case types (e.g. previously ticked PCN + UFN, now
+  // ticks just MG11 — the cached intersection is wrong).
+  cachedForCaseTypeIds: '',
 })
 async function createLetter() {
-  if (!_ensureSelection()) return
+  const caseIds = _ensureSelection()
+  if (!caseIds) return
   letterModal.open = true
   letterModal.templateId = ''
   letterModal.copies = 1
   letterModal.language = 'English'
   letterModal.saving = false
   letterModal.error = ''
-  if (!letterModal.templates.length) {
+
+  // Derive the distinct case_type_ids from the ticked rows. The backend
+  // intersection filter then returns only templates valid for ALL of them.
+  const ticked = new Set(caseIds)
+  const caseTypeIds = [
+    ...new Set(rows.value.filter(r => ticked.has(r.case_id))
+                          .map(r => r.case_type_id)
+                          .filter(Boolean)),
+  ]
+  const fingerprint = caseTypeIds.slice().sort().join(',')
+
+  // Re-fetch when the case-type mix differs from the last cached call.
+  if (letterModal.templates.length === 0 || letterModal.cachedForCaseTypeIds !== fingerprint) {
+    letterModal.loadingTemplates = true
     try {
-      const data = await actionsService.letterTemplates()
+      const data = await actionsService.letterTemplates({ caseTypeIds })
       letterModal.templates = data?.results ?? (Array.isArray(data) ? data : [])
+      letterModal.cachedForCaseTypeIds = fingerprint
     } catch (e) {
       console.error('[create-letter] template load failed', e)
       letterModal.error = 'Failed to load letter templates.'
+    } finally {
+      letterModal.loadingTemplates = false
     }
   }
 }
@@ -956,7 +996,19 @@ const statusModal = reactive({
   saving: false,
   error: '',
   statuses: [],
+  // Closure reasons sourced from the NOTICE_CLOSURE_REASON lookup. Legacy
+  // pinned three preferred values at the top — we replicate that ordering
+  // so muscle memory carries over.
+  closureReasons: [],
 })
+
+// Legacy ordering hint — these three are surfaced first inside the dropdown,
+// the remaining values follow alphabetically by `lookup_data_value`.
+const PINNED_CLOSURE_REASONS = [
+  'Closed - Paid',
+  'Closed - Paid on train',
+  'Closed - Successful Appeal',
+]
 const pickedStatusDesc = computed(() => {
   const s = statusModal.statuses.find(x => x.case_status_id === statusModal.newStatusId)
   return (s?.status_desc || '').toLowerCase()
@@ -994,6 +1046,42 @@ async function updateStatus() {
       const list = data?.results ?? data ?? []
       courts.value = list.filter(c => c.active)
     } catch { /* surface as empty dropdown */ }
+  }
+  // Closure reasons — lazy-load on first open, then keep around for the
+  // lifetime of the page. Source: NOTICE_CLOSURE_REASON lookup type, tenant-
+  // scoped via /revp/lookup/by-type/. Same endpoint already used elsewhere.
+  if (statusModal.closureReasons.length === 0) {
+    try {
+      const { api } = await import('@/services/api.js')
+      const rows = await api.get('/revp/lookup/by-type/?name=NOTICE_CLOSURE_REASON')
+      // De-dup on value (some rows in the legacy data ship duplicated), then
+      // split into pinned-first and the rest alphabetised. Persist as
+      // [{ id, value }] — we submit the value, not the id, because the
+      // backend column is a text field, matching legacy behaviour.
+      const seenValues = new Set()
+      const cleaned = []
+      for (const r of rows) {
+        const value = (r.lookup_data_value || '').trim()
+        if (!value || seenValues.has(value)) continue
+        seenValues.add(value)
+        cleaned.push({ id: r.lookup_data_id, value })
+      }
+      const pinned = []
+      const rest = []
+      for (const r of cleaned) {
+        (PINNED_CLOSURE_REASONS.includes(r.value) ? pinned : rest).push(r)
+      }
+      // Pinned in the legacy order, rest alphabetised.
+      pinned.sort((a, b) =>
+        PINNED_CLOSURE_REASONS.indexOf(a.value) - PINNED_CLOSURE_REASONS.indexOf(b.value)
+      )
+      rest.sort((a, b) => a.value.localeCompare(b.value))
+      statusModal.closureReasons = [...pinned, ...rest]
+    } catch (e) {
+      console.error('[update-status] closure reasons load failed', e)
+      // Soft-fail — operator can still type a custom value if we keep the
+      // editable-on-error fallback in the template (datalist).
+    }
   }
 }
 function closeStatusModal() { if (!statusModal.saving) statusModal.open = false }

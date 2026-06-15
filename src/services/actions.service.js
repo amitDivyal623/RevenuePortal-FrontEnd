@@ -87,8 +87,21 @@ export const actionsService = {
       language,
     }),
 
-  // Letter templates for the dropdown. Returns the active list for the tenant.
-  letterTemplates: () => api.get('/revp/templates/letters/?active=1'),
+  // Letter templates for the dropdown.
+  // - No args: returns every active template for the tenant.
+  // - { caseTypeIds: [...] }: returns only templates whose case-type mapping
+  //   covers ALL of the supplied case_type_ids. Mirrors legacy
+  //   RvpSelectCaseType — if the operator ticked 3 PCN + 2 UFN cases, only
+  //   templates valid for BOTH PCN and UFN are returned. The backend handles
+  //   the intersection logic; the frontend just passes the CSV.
+  letterTemplates: ({ caseTypeIds } = {}) => {
+    const p = new URLSearchParams({ active: '1' })
+    if (Array.isArray(caseTypeIds) && caseTypeIds.length > 0) {
+      const cleaned = [...new Set(caseTypeIds.filter(Boolean).map(String))]
+      if (cleaned.length > 0) p.set('case_type_id', cleaned.join(','))
+    }
+    return api.get(`/revp/templates/letters/?${p.toString()}`)
+  },
 
   // Email templates for the dropdown. Returns active templates for the tenant.
   emailTemplates: () => api.get('/revp/templates/emails/?active=1'),
