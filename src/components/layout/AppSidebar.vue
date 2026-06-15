@@ -18,65 +18,68 @@
       </ul>
       <div class="nav-divider"></div>
 
-      <!-- Revenue Protection — visible to RevpAdminUser and RevpAgentUser -->
-      <template v-if="isRevpUser">
+      <!-- Revenue Protection — visible to RevpAdminUser, RevpAgentUser, OR RP Station Config -->
+      <template v-if="isRevpUser || hasStationRole">
         <div class="nav-section-label">REVENUE PROTECTION</div>
         <ul class="nav-section">
-          <li>
-            <RouterLink to="/dashboard" class="nav-item" :class="{ active: $route.name === 'rp-dashboard' }">
-              <span class="nav-text">Dashboard</span>
-            </RouterLink>
-          </li>
-          <li>
-            <RouterLink to="/quick-case-search" class="nav-item" :class="{ active: $route.name === 'quick-case-search' }">
-              <span class="nav-text">Quick Case Search</span>
-            </RouterLink>
-          </li>
-          <li>
-            <RouterLink to="/add-new-case" class="nav-item" :class="{ active: $route.name === 'add-new-case' }">
-              <span class="nav-text">Add New Case</span>
-            </RouterLink>
-          </li>
-          <li>
-            <RouterLink to="/cases" class="nav-item" :class="{ active: $route.name === 'cases' }">
-              <span class="nav-text">Case List</span>
-            </RouterLink>
-          </li>
-          <!-- Intelligence Report — also requires IR Report History sub-role -->
-          <li v-if="hasIRRole">
-            <RouterLink to="/intelligence-report" class="nav-item" :class="{ active: $route.name === 'intelligence-report' }">
-              <span class="nav-text">Intelligence Report</span>
-            </RouterLink>
-          </li>
-          <li>
-            <RouterLink to="/payment-records" class="nav-item" :class="{ active: $route.name === 'payment-records' }">
-              <span class="nav-text">Payment Records</span>
-            </RouterLink>
-          </li>
-          <li>
-            <RouterLink to="/action-tracker" class="nav-item" :class="{ active: $route.name === 'action-tracker' }">
-              <span class="nav-text">Action Tracker</span>
-            </RouterLink>
-          </li>
-          <li>
-            <RouterLink to="/print-queue" class="nav-item" :class="{ active: $route.name === 'print-queue' }">
-              <span class="nav-text">Print Queue</span>
-            </RouterLink>
-          </li>
-          <li>
-            <RouterLink to="/address-search" class="nav-item" :class="{ active: $route.name === 'address-search' }">
-              <span class="nav-text">Perform Address Search</span>
-            </RouterLink>
-          </li>
-          <!-- Court Booking — RevpAdminUser only -->
-          <li v-if="isRevpAdmin">
-            <RouterLink to="/court-booking" class="nav-item" :class="{ active: $route.name === 'court-booking' }">
-              <span class="nav-text">Court Booking</span>
-            </RouterLink>
-          </li>
+          <!-- Case items: RevpAdminUser and RevpAgentUser only -->
+          <template v-if="isRevpUser">
+            <li>
+              <RouterLink to="/dashboard" class="nav-item" :class="{ active: $route.name === 'rp-dashboard' }">
+                <span class="nav-text">Dashboard</span>
+              </RouterLink>
+            </li>
+            <li>
+              <RouterLink to="/quick-case-search" class="nav-item" :class="{ active: $route.name === 'quick-case-search' }">
+                <span class="nav-text">Quick Case Search</span>
+              </RouterLink>
+            </li>
+            <li>
+              <RouterLink to="/add-new-case" class="nav-item" :class="{ active: $route.name === 'add-new-case' }">
+                <span class="nav-text">Add New Case</span>
+              </RouterLink>
+            </li>
+            <li>
+              <RouterLink to="/cases" class="nav-item" :class="{ active: $route.name === 'cases' }">
+                <span class="nav-text">Case List</span>
+              </RouterLink>
+            </li>
+            <!-- Intelligence Report — also requires IR Report History sub-role -->
+            <li v-if="hasIRRole">
+              <RouterLink to="/intelligence-report" class="nav-item" :class="{ active: $route.name === 'intelligence-report' }">
+                <span class="nav-text">Intelligence Report</span>
+              </RouterLink>
+            </li>
+            <li>
+              <RouterLink to="/payment-records" class="nav-item" :class="{ active: $route.name === 'payment-records' }">
+                <span class="nav-text">Payment Records</span>
+              </RouterLink>
+            </li>
+            <li>
+              <RouterLink to="/action-tracker" class="nav-item" :class="{ active: $route.name === 'action-tracker' }">
+                <span class="nav-text">Action Tracker</span>
+              </RouterLink>
+            </li>
+            <li>
+              <RouterLink to="/print-queue" class="nav-item" :class="{ active: $route.name === 'print-queue' }">
+                <span class="nav-text">Print Queue</span>
+              </RouterLink>
+            </li>
+            <li>
+              <RouterLink to="/address-search" class="nav-item" :class="{ active: $route.name === 'address-search' }">
+                <span class="nav-text">Perform Address Search</span>
+              </RouterLink>
+            </li>
+            <!-- Court Booking — RevpAdminUser only -->
+            <li v-if="isRevpAdmin">
+              <RouterLink to="/court-booking" class="nav-item" :class="{ active: $route.name === 'court-booking' }">
+                <span class="nav-text">Court Booking</span>
+              </RouterLink>
+            </li>
+          </template>
 
-          <!-- Revenue Protection Admin — RevpAdminUser only -->
-          <li v-if="isRevpAdmin">
+          <!-- Revenue Protection Admin — RevpAdminUser OR RP Station Config -->
+          <li v-if="isRevpAdmin || hasStationRole">
             <button
               class="nav-item"
               :class="{ open: openGroups.includes('rpAdmin'), 'has-active': rpAdminChildActive }"
@@ -89,28 +92,35 @@
               </svg>
             </button>
             <ul v-if="openGroups.includes('rpAdmin')" class="nav-sub">
-              <li><RouterLink to="/admin/action-template"      class="nav-sub-item" :class="{ active: $route.name === 'action-template' }">Action Template</RouterLink></li>
-              <li><RouterLink to="/admin/courts"               class="nav-sub-item" :class="{ active: $route.name === 'courts' }">Courts</RouterLink></li>
-              <li><RouterLink to="/admin/ticket-pads"          class="nav-sub-item" :class="{ active: $route.name === 'ticket-pads' }">Ticket Pads</RouterLink></li>
-              <li><RouterLink to="/admin/letter-templates"     class="nav-sub-item" :class="{ active: $route.name === 'letter-templates' }">Letter Templates</RouterLink></li>
-              <li><RouterLink to="/admin/email-templates"      class="nav-sub-item" :class="{ active: $route.name === 'email-templates' }">Email Templates</RouterLink></li>
-              <li><RouterLink to="/admin/print-templates"      class="nav-sub-item" :class="{ active: $route.name === 'print-templates' }">Print Templates</RouterLink></li>
-              <li><RouterLink to="/admin/manual-case-initials" class="nav-sub-item" :class="{ active: $route.name === 'manual-case-initials' }">Manual Case Initials</RouterLink></li>
-              <li><RouterLink to="/admin/offences"             class="nav-sub-item" :class="{ active: $route.name === 'offences' }">Offences</RouterLink></li>
-              <li><RouterLink to="/admin/charges"              class="nav-sub-item" :class="{ active: $route.name === 'admin-charges' }">Charges and Appeals</RouterLink></li>
-              <li><RouterLink to="/admin/casetype"             class="nav-sub-item" :class="{ active: $route.name === 'admin-casetype' }">Casetype Appeal Enabled</RouterLink></li>
-              <li><RouterLink to="/admin/zero-fare"            class="nav-sub-item" :class="{ active: $route.name === 'zero-fare' }">Zero Fare For App Control</RouterLink></li>
-              <li><RouterLink to="/admin/printer-app"          class="nav-sub-item" :class="{ active: $route.name === 'printer-app' }">Printer App Control</RouterLink></li>
-              <li><RouterLink to="/admin/intel-config"         class="nav-sub-item" :class="{ active: $route.name === 'intel-config' }">Intelligence Report Config</RouterLink></li>
-              <li><RouterLink to="/admin/auth-prosecutor"      class="nav-sub-item" :class="{ active: $route.name === 'auth-prosecutor' }">Authorising Prosecutor</RouterLink></li>
-              <li><RouterLink to="/admin/lookup-values"        class="nav-sub-item" :class="{ active: $route.name === 'lookup-values' }">Lookup Values</RouterLink></li>
-              <li><RouterLink to="/admin/address-log"          class="nav-sub-item" :class="{ active: $route.name === 'address-log' }">Address Search Log</RouterLink></li>
-              <li><RouterLink to="/admin/letter-vars"          class="nav-sub-item" :class="{ active: $route.name === 'letter-vars' }">Letter Variable Lookup</RouterLink></li>
-              <li><RouterLink to="/admin/station-mgmt"         class="nav-sub-item" :class="{ active: $route.name === 'station-mgmt' }">Station Management</RouterLink></li>
-              <li><RouterLink to="/admin/station-mgmt/service-type" class="nav-sub-item" :class="{ active: $route.name === 'service-type' }">Service Type Management</RouterLink></li>
-              <li><RouterLink to="/admin/car-park"             class="nav-sub-item" :class="{ active: $route.name === 'car-park' }">Car Park Locations</RouterLink></li>
-              <li><RouterLink to="/admin/remove-case"          class="nav-sub-item" :class="{ active: $route.name === 'remove-case' }">Remove Case Completely</RouterLink></li>
-              <li><RouterLink to="/admin/users"                class="nav-sub-item" :class="{ active: $route.name === 'users' }">Users</RouterLink></li>
+              <!-- Admin-only items: RevpAdminUser only -->
+              <template v-if="isRevpAdmin">
+                <li><RouterLink to="/admin/action-template"      class="nav-sub-item" :class="{ active: $route.name === 'action-template' }">Action Template</RouterLink></li>
+                <li><RouterLink to="/admin/courts"               class="nav-sub-item" :class="{ active: $route.name === 'courts' }">Courts</RouterLink></li>
+                <li><RouterLink to="/admin/ticket-pads"          class="nav-sub-item" :class="{ active: $route.name === 'ticket-pads' }">Ticket Pads</RouterLink></li>
+                <li><RouterLink to="/admin/letter-templates"     class="nav-sub-item" :class="{ active: $route.name === 'letter-templates' }">Letter Templates</RouterLink></li>
+                <li><RouterLink to="/admin/email-templates"      class="nav-sub-item" :class="{ active: $route.name === 'email-templates' }">Email Templates</RouterLink></li>
+                <li><RouterLink to="/admin/print-templates"      class="nav-sub-item" :class="{ active: $route.name === 'print-templates' }">Print Templates</RouterLink></li>
+                <li><RouterLink to="/admin/manual-case-initials" class="nav-sub-item" :class="{ active: $route.name === 'manual-case-initials' }">Manual Case Initials</RouterLink></li>
+                <li><RouterLink to="/admin/offences"             class="nav-sub-item" :class="{ active: $route.name === 'offences' }">Offences</RouterLink></li>
+                <li><RouterLink to="/admin/charges"              class="nav-sub-item" :class="{ active: $route.name === 'admin-charges' }">Charges and Appeals</RouterLink></li>
+                <li><RouterLink to="/admin/casetype"             class="nav-sub-item" :class="{ active: $route.name === 'admin-casetype' }">Casetype Appeal Enabled</RouterLink></li>
+                <li><RouterLink to="/admin/zero-fare"            class="nav-sub-item" :class="{ active: $route.name === 'zero-fare' }">Zero Fare For App Control</RouterLink></li>
+                <li><RouterLink to="/admin/printer-app"          class="nav-sub-item" :class="{ active: $route.name === 'printer-app' }">Printer App Control</RouterLink></li>
+                <li><RouterLink to="/admin/intel-config"         class="nav-sub-item" :class="{ active: $route.name === 'intel-config' }">Intelligence Report Config</RouterLink></li>
+                <li><RouterLink to="/admin/auth-prosecutor"      class="nav-sub-item" :class="{ active: $route.name === 'auth-prosecutor' }">Authorising Prosecutor</RouterLink></li>
+                <li><RouterLink to="/admin/lookup-values"        class="nav-sub-item" :class="{ active: $route.name === 'lookup-values' }">Lookup Values</RouterLink></li>
+                <li><RouterLink to="/admin/address-log"          class="nav-sub-item" :class="{ active: $route.name === 'address-log' }">Address Search Log</RouterLink></li>
+                <li><RouterLink to="/admin/letter-vars"          class="nav-sub-item" :class="{ active: $route.name === 'letter-vars' }">Letter Variable Lookup</RouterLink></li>
+              </template>
+              <!-- Station items: visible to RevpAdminUser AND RP Station Config -->
+              <li><RouterLink to="/admin/station-mgmt"               class="nav-sub-item" :class="{ active: $route.name === 'station-mgmt' }">Station Management</RouterLink></li>
+              <li><RouterLink to="/admin/station-mgmt/service-type"  class="nav-sub-item" :class="{ active: $route.name === 'service-type' }">Service Type Management</RouterLink></li>
+              <li><RouterLink to="/admin/car-park"                   class="nav-sub-item" :class="{ active: $route.name === 'car-park' }">Car Park Locations</RouterLink></li>
+              <!-- Admin-only items continued -->
+              <template v-if="isRevpAdmin">
+                <li><RouterLink to="/admin/remove-case"          class="nav-sub-item" :class="{ active: $route.name === 'remove-case' }">Remove Case Completely</RouterLink></li>
+                <li><RouterLink to="/admin/users"                class="nav-sub-item" :class="{ active: $route.name === 'users' }">Users</RouterLink></li>
+              </template>
             </ul>
           </li>
         </ul>
@@ -140,9 +150,10 @@ const $route = useRoute()
 const auth = useAuthStore()
 const openGroups = ref(['rpAdmin'])
 
-const isRevpUser  = computed(() => auth.hasRole('RevpAdminUser') || auth.hasRole('RevpAgentUser'))
-const isRevpAdmin = computed(() => auth.hasRole('RevpAdminUser'))
-const hasIRRole   = computed(() => auth.hasRole('IR Report History'))
+const isRevpUser     = computed(() => auth.hasRole('RevpAdminUser') || auth.hasRole('RevpAgentUser'))
+const isRevpAdmin    = computed(() => auth.hasRole('RevpAdminUser'))
+const hasIRRole      = computed(() => auth.hasRole('IR Report History'))
+const hasStationRole = computed(() => auth.hasRole('RP Station Config'))
 
 const RP_ADMIN_ROUTES = [
   'action-template', 'courts', 'ticket-pads', 'letter-templates', 'email-templates',
