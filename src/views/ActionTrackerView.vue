@@ -251,12 +251,19 @@
           </p>
           <div class="form-group">
             <label class="form-label">Letter template *</label>
-            <select v-model="letterModal.templateId">
-              <option value="">Select a template…</option>
+            <select v-model="letterModal.templateId" :disabled="letterTemplatesLoading">
+              <option value="">
+                {{ letterTemplatesLoading ? 'Loading templates…' : 'Select a template…' }}
+              </option>
               <option v-for="t in letterTemplates" :key="t.letter_template_id" :value="t.letter_template_id">
                 {{ t.title }}
               </option>
             </select>
+            <p v-if="!letterTemplatesLoading && letterTemplates.length === 0"
+               class="text-light" style="font-size:0.8rem;margin:4px 0 0">
+              No letter template is valid for every case type you selected.
+              Tick rows of a single type, or ask an admin to map a template to this combination.
+            </p>
           </div>
           <div class="form-group">
             <label class="form-label">Copies</label>
@@ -518,6 +525,10 @@ function fmtDateTime(iso) {
 const letterModalOpen  = ref(false)
 const letterModalError = ref('')
 const letterTemplates  = ref([])
+const letterTemplatesLoading = ref(false)
+// Last set of case_type_ids the template list was fetched for. We re-fetch
+// when the operator opens the modal with a different mix.
+const letterTemplatesCachedFor = ref('')
 const letterModal = reactive({
   templateId: '',
   copies:     1,
@@ -533,13 +544,27 @@ async function openLetterModal() {
   letterModal.copies = 1
   letterModal.language = 'English'
 
-  if (letterTemplates.value.length === 0) {
+  // Derive distinct case_type_ids from the ticked rows so the backend
+  // returns only templates valid for ALL selected case types (intersection).
+  const tickedActionIds = selectedActionIds
+  const caseTypeIds = [
+    ...new Set(rows.value.filter(r => tickedActionIds.has(r.action_id))
+                          .map(r => r.case_type_id)
+                          .filter(Boolean)),
+  ]
+  const fingerprint = caseTypeIds.slice().sort().join(',')
+
+  if (letterTemplates.value.length === 0 || letterTemplatesCachedFor.value !== fingerprint) {
+    letterTemplatesLoading.value = true
     try {
-      const data = await actionsService.letterTemplates()
+      const data = await actionsService.letterTemplates({ caseTypeIds })
       letterTemplates.value = data?.results ?? (Array.isArray(data) ? data : [])
+      letterTemplatesCachedFor.value = fingerprint
     } catch (e) {
       console.error('[create-letter] templates load failed', e)
       letterModalError.value = 'Failed to load letter templates.'
+    } finally {
+      letterTemplatesLoading.value = false
     }
   }
 }

@@ -1003,6 +1003,12 @@
 
       <!-- NOTES -->
       <div v-show="activeTab === 'notes'">
+        <div v-if="notesTabHint"
+             style="margin-bottom: 12px; padding: 8px 12px; background: #ecfdf5;
+                    border: 1px solid #a7f3d0; border-radius: 4px; color: #065f46;
+                    font-size: 0.85rem;">
+          {{ notesTabHint }}
+        </div>
         <div class="flex gap-sm" style="justify-content: flex-end; margin-bottom: 12px">
           <button class="btn-action-light" :disabled="notes.length === 0" @click="printAllNotes">PRINT ALL NOTES</button>
           <button class="btn-action-light" @click="addNote">ADD</button>
@@ -1012,6 +1018,8 @@
             <select v-model="notesPerPage" class="rows-select" @change="notesCurrentPage = 1">
               <option :value="5">5</option>
               <option :value="10">10</option>
+              <option :value="25">25</option>
+              <option :value="50">50</option>
             </select>
             <span class="toolbar-text">records per page</span>
           </div>
@@ -1400,6 +1408,12 @@
 
       <!-- LINKED CASES -->
       <div v-show="activeTab === 'linked'">
+        <div v-if="linkedTabHint"
+             style="margin-bottom: 12px; padding: 8px 12px; background: #eff6ff;
+                    border: 1px solid #bfdbfe; border-radius: 4px; color: #1e3a8a;
+                    font-size: 0.85rem;">
+          {{ linkedTabHint }}
+        </div>
         <div class="flex gap-sm" style="margin-bottom: 12px">
           <button class="btn-action-green" @click="linkAdditionalCase">LINK ADDITIONAL CASE</button>
           <button class="btn-action-light" @click="unlinkSelectedCase">UNLINK SELECTED CASE</button>
@@ -1423,7 +1437,16 @@
           <table>
             <thead>
               <tr>
-                <th class="col-icon"></th>
+                <th class="col-icon">
+                  <input
+                    type="checkbox"
+                    :checked="allLinkedSelected"
+                    :indeterminate.prop="someLinkedSelected && !allLinkedSelected"
+                    :disabled="linkedCases.length === 0"
+                    aria-label="Select all linked cases"
+                    @change="toggleAllLinkedSelected"
+                  />
+                </th>
                 <th>Case Number</th>
                 <th>Offence Date</th>
                 <th>Type</th>
@@ -1436,11 +1459,10 @@
               <tr v-for="row in linkedCases" :key="row.linked_id">
                 <td class="col-icon">
                   <input
-                    type="radio"
-                    name="linked-row-select"
-                    :value="row.linked_id"
-                    v-model="selectedLinkedId"
+                    type="checkbox"
+                    :checked="selectedLinkedIds.has(row.linked_id)"
                     :aria-label="`Select ${row.case_num}`"
+                    @change="toggleLinkedSelected(row.linked_id)"
                   />
                 </td>
                 <td>
@@ -1483,27 +1505,62 @@
          Shows auto-detect suggestions from /linkable/, lets the user pick one,
          then POSTs to /linked/ to create the revp_linked row.
          Mirrors legacy `getLinkedCasesRecordCount` (param=1) + linkData.create. -->
-    <div v-if="linkModalOpen" class="modal-backdrop">
+    <div v-if="linkModalOpen" class="modal-backdrop" @click.self="linkModalOpen = false">
       <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="link-modal-title"
            style="max-width: 880px; width: 90%;">
         <div class="modal-head">
           <h2 id="link-modal-title" class="modal-title">Link Additional Case</h2>
           <button type="button" class="modal-close" aria-label="Close" @click="linkModalOpen = false">×</button>
         </div>
-        <div class="modal-body" style="padding: 16px 20px; max-height: 60vh; overflow-y: auto;">
+        <div class="modal-body" style="padding: 16px 20px; max-height: 65vh; overflow-y: auto;">
+          <!-- Search row — matches legacy: case number, name, vehicle reg.
+               Empty term restores the auto-suggest mode. -->
+          <div style="display:flex; gap:8px; align-items:center; margin-bottom:12px;">
+            <input
+              v-model="linkSearchTerm"
+              type="text"
+              placeholder="Search by case number, first name, surname or vehicle reg"
+              style="flex:1; padding:6px 10px; border:1px solid #d1d5db; border-radius:4px;"
+              @keyup.enter="runLinkSearch"
+            />
+            <button type="button" class="btn-action-green" :disabled="linkLoading" @click="runLinkSearch">
+              Search
+            </button>
+            <button v-if="linkMode === 'search'" type="button" class="btn-action-light" @click="restoreAutoSuggestions">
+              Auto-suggestions
+            </button>
+          </div>
           <p style="font-size: 12px; color: #6b7280; margin-bottom: 12px;">
-            Cases below share customer details (surname + postcode, contact number, or email)
-            with this case. Pick one and click LINK to create the relationship.
+            <template v-if="linkMode === 'auto'">
+              Cases below share customer details (surname + postcode, contact number, or email)
+              with this case. Pick one and click LINK to create the relationship.
+              To link a case that doesn't auto-match, use the search box above.
+            </template>
+            <template v-else>
+              Showing search results for <strong>"{{ linkSubmittedTerm }}"</strong>.
+              Pick one and click LINK to create the relationship.
+            </template>
           </p>
           <div v-if="linkLoading" style="text-align: center; padding: 1rem; color: #6b7280;">Loading…</div>
           <div v-else-if="linkSuggestions.length === 0" class="empty-state">
-            <p class="empty-state-desc">No matching cases found.</p>
+            <p class="empty-state-desc">
+              <template v-if="linkMode === 'search'">No cases match that search term in this tenant.</template>
+              <template v-else>No auto-suggested cases share customer details. Use the search box above to find a case manually.</template>
+            </p>
           </div>
           <div v-else class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th class="col-icon"></th>
+                  <th class="col-icon">
+                    <input
+                      type="checkbox"
+                      :checked="allLinkSuggestionsSelected"
+                      :indeterminate.prop="someLinkSuggestionsSelected && !allLinkSuggestionsSelected"
+                      aria-label="Select all suggestions"
+                      @change="toggleAllLinkSuggestionsSelected"
+                    />
+                  </th>
                   <th>Case Number</th>
                   <th>Offence Date</th>
                   <th>Type</th>
@@ -1513,16 +1570,21 @@
                 </tr>
               </thead>
               <tbody>
-                <tr v-for="s in linkSuggestions" :key="s.case_id">
+                <tr v-for="s in linkSuggestions" :key="s.case_id"
+                    :class="{ 'row-selected': linkSelectedCaseIds.has(s.case_id) }"
+                    style="cursor:pointer"
+                    @click="toggleLinkSuggestionSelected(s.case_id)">
                   <td class="col-icon">
-                    <input type="radio" name="link-suggestion"
-                           :value="s.case_id" v-model="linkSelectedCaseId" />
+                    <input type="checkbox"
+                           :checked="linkSelectedCaseIds.has(s.case_id)"
+                           @click.stop
+                           @change="toggleLinkSuggestionSelected(s.case_id)" />
                   </td>
                   <td>{{ s.case_num }}</td>
                   <td>{{ fmtDate(s.case_dt) }}</td>
                   <td>{{ s.case_type_code || '—' }}</td>
                   <td>{{ s.case_status_desc || '—' }}</td>
-                  <td>{{ s.customer_name || '—' }}</td>
+                  <td>{{ s.customer_name || s.offender_name || '—' }}</td>
                   <td>{{ s.post_code || '—' }}</td>
                 </tr>
               </tbody>
@@ -1535,7 +1597,13 @@
         </div>
         <div class="modal-foot" style="padding: 12px 20px; display: flex; justify-content: flex-end; gap: 8px;">
           <button type="button" class="btn-action-red"   @click="linkModalOpen = false">CANCEL</button>
-          <button type="button" class="btn-action-green" :disabled="!linkSelectedCaseId" @click="confirmLink">LINK</button>
+          <button type="button" class="btn-action-green"
+                  :disabled="linkSelectedCaseIds.size === 0 || linkLoading || linkSaving"
+                  @click="confirmLink">
+            {{ linkSaving
+               ? `Linking ${linkSelectedCaseIds.size}…`
+               : `LINK${linkSelectedCaseIds.size > 1 ? ` (${linkSelectedCaseIds.size})` : ''}` }}
+          </button>
         </div>
       </div>
     </div>
@@ -1807,7 +1875,9 @@
     <!-- Add Note modal — opens from Notes tab ADD button. Writes one
          revp_note row + one revp_audit_history row in a single backend
          transaction (mirrors legacy setNotesDetailsByCaseid). -->
-    <div v-if="noteModalOpen" class="modal-backdrop">
+    <div v-if="noteModalOpen" class="modal-backdrop"
+         @click.self="!noteSaving && (noteModalOpen = false)"
+         @keydown.esc="!noteSaving && (noteModalOpen = false)">
       <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="note-modal-title">
         <div class="modal-head">
           <h2 id="note-modal-title" class="modal-title">Add Note</h2>
@@ -1816,19 +1886,23 @@
         <div class="modal-body" style="padding: 16px 20px;">
           <label class="form-label-left" style="display:block;margin-bottom:6px;">Note text</label>
           <textarea
+            ref="noteTextarea"
             v-model="noteText"
             rows="6"
             maxlength="10000"
             placeholder="Type the note here…"
-            style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-family:inherit;font-size:13px;"
+            style="width:100%;padding:8px;border:1px solid #d1d5db;border-radius:6px;font-family:inherit;font-size:13px;resize:vertical;max-height:50vh;"
           ></textarea>
+          <p style="font-size:11px;color:#6b7280;margin:4px 0 0;text-align:right;">
+            {{ noteText.length }} / 10000
+          </p>
           <p v-if="noteError" class="form-error" role="alert" style="color:#b91c1c;font-size:12px;margin-top:6px;">
             {{ noteError }}
           </p>
         </div>
         <div class="modal-foot" style="padding: 12px 20px;display:flex;justify-content:flex-end;gap:8px;">
           <button type="button" class="btn-action-red"   @click="noteModalOpen = false" :disabled="noteSaving">CANCEL</button>
-          <button type="button" class="btn-action-green" @click="submitNote"            :disabled="noteSaving">
+          <button type="button" class="btn-action-green" @click="submitNote"            :disabled="noteSaving || !noteText.trim()">
             {{ noteSaving ? 'SAVING…' : 'SAVE' }}
           </button>
         </div>
@@ -3151,7 +3225,9 @@ async function loadCase() {
       notes.value = notesResult.value.map(n => ({
         id:       n.note_id,
         datetime: fmtDateTime(n.created_dt),
-        author:   n.author || n.created_by || '',
+        // Prefer the resolved display name from the backend; fall back to
+        // the raw UUID only if the join missed (e.g. orphaned author_id).
+        author:   n.author_name || n.author || n.created_by || '',
         note:     n.description || '',
       }))
     }
@@ -4660,13 +4736,21 @@ async function submitNote() {
   try {
     const created = await casesService.createNote(route.params.caseid, text)
     // Prepend so the new note is visible at the top without re-fetching.
+    // Use the resolved author_name from the API; only fall back to the
+    // UUID if the backend couldn't resolve (avoid showing "9EC45573-…").
     notes.value.unshift({
       id:       created.note_id,
       datetime: fmtDateTime(created.created_dt),
-      author:   created.author || created.created_by || '',
+      author:   created.author_name || created.author || created.created_by || '',
       note:     created.description || '',
     })
+    // Jump back to page 1 — the new note prepends and we don't want the
+    // operator to stay on page 3 staring at unchanged rows wondering if
+    // anything happened. Previous wiring silently left the page index in
+    // place which read as "save did nothing".
+    notesCurrentPage.value = 1
     noteModalOpen.value = false
+    _showNotesHint('Note added.')
   } catch (err) {
     noteError.value = err?.data?.detail
       || err?.data?.description?.[0]
@@ -4675,6 +4759,17 @@ async function submitNote() {
   } finally {
     noteSaving.value = false
   }
+}
+
+// Inline transient hint for the Notes tab (success / "select first" /
+// failure). Same pattern as the Linked tab — keeps page-level loadError
+// banner clean. Auto-clears after 3s.
+const notesTabHint = ref('')
+function _showNotesHint(msg) {
+  notesTabHint.value = msg
+  setTimeout(() => {
+    if (notesTabHint.value === msg) notesTabHint.value = ''
+  }, 3000)
 }
 
 function openLinkedCase(row) {
@@ -5180,52 +5275,153 @@ async function submitStatusModal() {
 // ── Linked Cases controls ────────────────────────────────────────────────────
 // Single-select: the row that's currently checked in the Linked Cases table.
 // Drives OPEN SELECTED CASE + UNLINK SELECTED CASE.
-const selectedLinkedId = ref('')
-
-// LINK ADDITIONAL CASE modal state — populated from the /linkable/ endpoint
-// which mirrors legacy getLinkedCasesRecordCount(param=1).
-const linkModalOpen     = ref(false)
-const linkSuggestions   = ref([])
-const linkSelectedCaseId = ref('')
-const linkLoading       = ref(false)
-const linkError         = ref('')
-
-function selectedLinkedRow() {
-  return linkedCases.value.find(r => r.linked_id === selectedLinkedId.value) || null
+// Linked Cases table — MULTI-select via checkboxes (legacy parity:
+// linkedcheck / selector[] / linkedCheckbox in revpCaseListEdit.cfm). Lets
+// the operator batch-unlink or batch-open without N round-trips of clicks.
+const selectedLinkedIds = ref(new Set())
+const allLinkedSelected = computed(() =>
+  linkedCases.value.length > 0 &&
+  linkedCases.value.every(r => selectedLinkedIds.value.has(r.linked_id))
+)
+const someLinkedSelected = computed(() => selectedLinkedIds.value.size > 0)
+function toggleLinkedSelected(linkedId) {
+  // Re-assign a fresh Set so Vue's reactivity picks up the membership change.
+  const next = new Set(selectedLinkedIds.value)
+  next.has(linkedId) ? next.delete(linkedId) : next.add(linkedId)
+  selectedLinkedIds.value = next
+}
+function toggleAllLinkedSelected() {
+  selectedLinkedIds.value = allLinkedSelected.value
+    ? new Set()
+    : new Set(linkedCases.value.map(r => r.linked_id))
 }
 
+// LINK ADDITIONAL CASE modal state. Two modes:
+//   - 'auto'   → suggestions come from /linkable/ (cases sharing customer
+//                details with the current case). This is the legacy
+//                getLinkedCasesRecordCount(param=1) flow.
+//   - 'search' → suggestions come from /quick-search/?term=... which mirrors
+//                the legacy "Enter Search Term" textbox (case number, first
+//                name, surname, vehicle reg). Lets the operator link a case
+//                that doesn't auto-match — the previous UI had no path to
+//                do that.
+// Modal row picker is ALSO multi-select to mirror legacy linkCheckbox
+// behaviour — operator can tick N candidates and link them all in one click.
+const linkModalOpen        = ref(false)
+const linkSuggestions      = ref([])
+const linkSelectedCaseIds  = ref(new Set())
+const linkLoading          = ref(false)
+const linkError            = ref('')
+const linkSaving           = ref(false)
+const linkSearchTerm       = ref('')
+const linkSubmittedTerm    = ref('')       // term used in the LAST search run
+const linkMode             = ref('auto')   // 'auto' | 'search'
+// Local feedback for "select first" hints — keeps page-level loadError clean
+const linkedTabHint        = ref('')
+
+const allLinkSuggestionsSelected = computed(() =>
+  linkSuggestions.value.length > 0 &&
+  linkSuggestions.value.every(s => linkSelectedCaseIds.value.has(s.case_id))
+)
+const someLinkSuggestionsSelected = computed(() => linkSelectedCaseIds.value.size > 0)
+function toggleLinkSuggestionSelected(caseId) {
+  const next = new Set(linkSelectedCaseIds.value)
+  next.has(caseId) ? next.delete(caseId) : next.add(caseId)
+  linkSelectedCaseIds.value = next
+}
+function toggleAllLinkSuggestionsSelected() {
+  linkSelectedCaseIds.value = allLinkSuggestionsSelected.value
+    ? new Set()
+    : new Set(linkSuggestions.value.map(s => s.case_id))
+}
+
+function selectedLinkedRows() {
+  return linkedCases.value.filter(r => selectedLinkedIds.value.has(r.linked_id))
+}
+
+// Helper: surface a short hint inline in the Linked tab without polluting
+// the page-level loadError banner. Self-clears after 3s.
+function _showLinkedHint(msg) {
+  linkedTabHint.value = msg
+  setTimeout(() => {
+    if (linkedTabHint.value === msg) linkedTabHint.value = ''
+  }, 3000)
+}
+
+// OPEN SELECTED CASE — multi-select aware. Opens one tab per ticked row,
+// matching legacy $('.linkedCheckbox:checked').each(... window.open ...).
+// For 1 selection we navigate in-tab; for >1 we use window.open per row
+// so the operator's current page isn't displaced.
 function openSelectedLinkedCase() {
-  const row = selectedLinkedRow()
-  if (!row) {
-    loadError.value = 'Select a linked case first.'
-    setTimeout(() => { if (loadError.value === 'Select a linked case first.') loadError.value = '' }, 2500)
+  const rows = selectedLinkedRows()
+  if (rows.length === 0) {
+    _showLinkedHint('Select at least one linked case first.')
     return
   }
-  router.push({ name: 'case-details', params: { caseid: row.case_id } })
+  if (rows.length === 1) {
+    router.push({ name: 'case-details', params: { caseid: rows[0].case_id } })
+    return
+  }
+  rows.forEach((row, idx) => {
+    if (!row.case_id) return
+    const href = router.resolve({ name: 'case-details', params: { caseid: row.case_id } }).href
+    window.open(href, `_caseTab_${idx}_${row.case_id}`, 'noopener')
+  })
+  _showLinkedHint(`Opened ${rows.length} case${rows.length === 1 ? '' : 's'} in new tabs.`)
 }
 
+// UNLINK SELECTED CASE — walks every ticked row and fires unlink per row.
+// Errors aggregate; partial-success still removes the succeeded rows from
+// the local list so the UI matches the server state. Matches legacy CSV
+// POST to unlinkeddata (one round-trip per row in our case, but operator
+// sees one "Unlinked N cases" hint).
 async function unlinkSelectedCase() {
-  const row = selectedLinkedRow()
-  if (!row) {
-    loadError.value = 'Select a linked case first.'
-    setTimeout(() => { if (loadError.value === 'Select a linked case first.') loadError.value = '' }, 2500)
+  const rows = selectedLinkedRows()
+  if (rows.length === 0) {
+    _showLinkedHint('Select at least one linked case first.')
     return
   }
-  if (!window.confirm(`Unlink case ${row.case_num} from this case?`)) return
-  try {
-    await casesService.unlink(route.params.caseid, row.linked_id)
-    linkedCases.value = linkedCases.value.filter(r => r.linked_id !== row.linked_id)
-    selectedLinkedId.value = ''
-  } catch (err) {
-    loadError.value = err?.data?.detail || err?.message || 'Failed to unlink case.'
+  const label = rows.length === 1
+    ? `Unlink case ${rows[0].case_num} from this case?`
+    : `Unlink ${rows.length} cases from this case?`
+  if (!window.confirm(label)) return
+
+  const succeeded = []
+  const failed = []
+  for (const row of rows) {
+    try {
+      await casesService.unlink(route.params.caseid, row.linked_id)
+      succeeded.push(row)
+    } catch (err) {
+      failed.push({ row, err })
+    }
+  }
+  const succeededIds = new Set(succeeded.map(r => r.linked_id))
+  linkedCases.value = linkedCases.value.filter(r => !succeededIds.has(r.linked_id))
+  // Keep failed selections ticked so the operator can retry.
+  selectedLinkedIds.value = new Set(failed.map(f => f.row.linked_id))
+
+  if (failed.length === 0) {
+    _showLinkedHint(`Unlinked ${succeeded.length} case${succeeded.length === 1 ? '' : 's'}.`)
+  } else if (succeeded.length === 0) {
+    _showLinkedHint(`Failed to unlink any of the ${failed.length} cases.`)
+  } else {
+    _showLinkedHint(`Unlinked ${succeeded.length}, failed ${failed.length}. Failed ones remain selected.`)
   }
 }
 
 async function linkAdditionalCase() {
-  linkModalOpen.value   = true
-  linkSelectedCaseId.value = ''
-  linkError.value       = ''
-  linkLoading.value     = true
+  linkModalOpen.value         = true
+  linkSelectedCaseIds.value   = new Set()
+  linkError.value             = ''
+  linkSearchTerm.value        = ''
+  linkSubmittedTerm.value     = ''
+  linkMode.value              = 'auto'
+  await _loadAutoSuggestions()
+}
+
+async function _loadAutoSuggestions() {
+  linkLoading.value = true
   try {
     const res = await casesService.listLinkable(route.params.caseid)
     linkSuggestions.value = Array.isArray(res) ? res : []
@@ -5237,25 +5433,111 @@ async function linkAdditionalCase() {
   }
 }
 
+async function runLinkSearch() {
+  const term = (linkSearchTerm.value || '').trim()
+  if (!term) {
+    // Empty term in the search box = back to auto-suggestions
+    await restoreAutoSuggestions()
+    return
+  }
+  linkMode.value            = 'search'
+  linkSelectedCaseIds.value = new Set()
+  linkError.value           = ''
+  linkLoading.value         = true
+  linkSubmittedTerm.value   = term
+  try {
+    const res = await casesService.quickSearch({ term, page: 1, pageSize: 50 })
+    // quickSearch returns the standard paginated envelope: { results, total, ... }
+    // The row shape differs from /linkable/: it has title/first_name/surname
+    // separately instead of a precomputed customer_name. Normalise here so
+    // the table renders the same way in both modes. Also drop the current
+    // case — linking a case to itself is invalid.
+    const currentId = route.params.caseid
+    linkSuggestions.value = (res?.results ?? [])
+      .filter(c => c.case_id !== currentId)
+      .map(c => ({
+        ...c,
+        customer_name: c.customer_name
+          ?? [c.title, c.first_name, c.surname].filter(Boolean).join(' ').trim()
+          ?? '',
+      }))
+  } catch (err) {
+    linkError.value = err?.data?.detail || err?.message || 'Search failed.'
+    linkSuggestions.value = []
+  } finally {
+    linkLoading.value = false
+  }
+}
+
+async function restoreAutoSuggestions() {
+  linkMode.value            = 'auto'
+  linkSearchTerm.value      = ''
+  linkSubmittedTerm.value   = ''
+  linkSelectedCaseIds.value = new Set()
+  await _loadAutoSuggestions()
+}
+
+// BATCH link — walks every ticked suggestion and POSTs one link per row.
+// Matches legacy linkCheckbox → linkcasenum=id1,id2,id3 → setlinkeddata.
+// Partial-success: succeeded rows are added to the linked list, failed
+// ones stay selected in the modal so the operator can retry.
 async function confirmLink() {
-  if (!linkSelectedCaseId.value) {
-    linkError.value = 'Select a case to link.'
+  const currentId = route.params.caseid
+  const targets = [...linkSelectedCaseIds.value].filter(id => id && id !== currentId)
+  if (targets.length === 0) {
+    linkError.value = 'Select at least one case to link.'
     return
   }
   linkError.value = ''
-  try {
-    await casesService.link(route.params.caseid, linkSelectedCaseId.value)
+  linkSaving.value = true
+  const succeeded = []
+  const failed = []
+  for (const linkedCaseId of targets) {
+    try {
+      await casesService.link(currentId, linkedCaseId)
+      succeeded.push(linkedCaseId)
+    } catch (err) {
+      failed.push({
+        case_id: linkedCaseId,
+        msg: err?.data?.detail || err?.data?.linked_case_id || err?.message || 'Failed.',
+      })
+    }
+  }
+  linkSaving.value = false
+
+  // Refetch the linked list so the new rows (with their display fields) appear.
+  if (succeeded.length > 0) {
+    try {
+      const fresh = await casesService.listLinked(currentId)
+      if (Array.isArray(fresh)) linkedCases.value = fresh
+    } catch { /* not fatal — the modal still closes; operator can refresh */ }
+  }
+
+  if (failed.length === 0) {
     linkModalOpen.value = false
-    // Re-fetch the linked list so the new row + its display fields appear.
-    const fresh = await casesService.listLinked(route.params.caseid)
-    if (Array.isArray(fresh)) linkedCases.value = fresh
-  } catch (err) {
-    linkError.value = err?.data?.detail
-      || err?.data?.linked_case_id
-      || err?.message
-      || 'Failed to link case.'
+    _showLinkedHint(`Linked ${succeeded.length} case${succeeded.length === 1 ? '' : 's'}.`)
+  } else if (succeeded.length === 0) {
+    linkError.value = failed.length === 1
+      ? failed[0].msg
+      : `Failed to link any of the ${failed.length} cases. First error: ${failed[0].msg}`
+  } else {
+    // Keep failed selections ticked, drop the succeeded ones.
+    linkSelectedCaseIds.value = new Set(failed.map(f => f.case_id))
+    linkError.value = `Linked ${succeeded.length}, failed ${failed.length}. Failed ones remain selected.`
   }
 }
+
+// Reload the linked list whenever the operator clicks back into the Linked
+// tab. Catches concurrent edits made by another agent on a different case
+// detail page (e.g. they unlinked one of these cases from their end).
+watch(activeTab, async (newTab) => {
+  if (newTab === 'linked' && route.params.caseid) {
+    try {
+      const fresh = await casesService.listLinked(route.params.caseid)
+      if (Array.isArray(fresh)) linkedCases.value = fresh
+    } catch { /* silent — tab still renders whatever was last loaded */ }
+  }
+})
 </script>
 
 <style scoped>
