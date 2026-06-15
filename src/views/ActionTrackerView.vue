@@ -87,7 +87,7 @@
       <fieldset class="actions-fieldset">
         <legend>Actions</legend>
         <div class="actions-toolbar">
-          <button class="btn btn-primary" :disabled="selectedCount === 0" @click="onOpenCase">OPEN CASE</button>
+          <button class="btn btn-primary" :disabled="uniqueSelectedCaseCount !== 1" @click="onOpenCase">OPEN CASE</button>
           <button class="btn btn-primary" :disabled="selectedCount === 0 || busy" @click="onCloseAndAction">CLOSE &amp; ACTION</button>
           <button class="btn btn-primary" :disabled="selectedCount === 0 || busy" @click="openCourtModal">ASSIGN COURT BOOKINGS</button>
           <button class="btn btn-primary" :disabled="selectedCount === 0 || busy" @click="openLetterModal">CREATE LETTER</button>
@@ -188,10 +188,21 @@
         </div>
         <div class="modal-body" style="max-height:60vh;overflow:auto">
           <p v-if="courtModal.loading" class="text-light">Loading court options…</p>
-          <p v-else-if="courtModal.groups.length === 0" class="text-light">
-            No selected case has a court assigned with an unbooked slot to pick.
-            (Cases must have <code>court_id</code> set and <code>court_booking_id</code> empty.)
-          </p>
+          <div v-else-if="courtModal.groups.length === 0" style="padding:0.5rem 0">
+            <p style="margin-bottom:0.4rem">
+              <strong>No bookable cases found.</strong>
+            </p>
+            <p style="margin-bottom:0.4rem">
+              To assign a court booking, the selected case must meet both conditions:
+            </p>
+            <ul style="margin:0 0 0.6rem 1.2rem;padding:0">
+              <li>A <strong>Court</strong> must be set on the case (Court/Summons Details tab)</li>
+              <li>No booking has been assigned to the case yet</li>
+            </ul>
+            <p style="font-size:0.8em;color:#888;margin:0">
+              Developer note: <code>court_id</code> must be non-null and <code>court_booking_id</code> must be null on <code>revp_case</code>.
+            </p>
+          </div>
           <div v-for="g in courtModal.groups" :key="g.court_id" class="court-group">
             <div class="court-group-head">{{ g.court_name || g.court_id }}</div>
             <div class="court-group-body">
@@ -275,6 +286,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import { actionsService } from '@/services/actions.service.js'
 import { caseTypesService } from '@/services/case-types.service.js'
 import { api, apiDownload, apiDownloadPost } from '@/services/api.js'
+import { swal } from '@/utils/swal.js'
 
 // ── Inline ChipMultiSelect component ─────────────────────────────────────
 // Renders selected items as removable chips + a single dropdown to add more.
@@ -478,8 +490,8 @@ async function submitCourtAssignment() {
       msg += `, skipped ${skipped.length}`
       console.warn('[court-booking] skipped', skipped)
     }
-    window.alert(msg)
     courtModalOpen.value = false
+    await swal.success(msg)
     clearSelection()
     await fetchPage()
   } catch (e) {

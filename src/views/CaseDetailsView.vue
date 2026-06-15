@@ -56,7 +56,7 @@
             </select>
           </div>
 
-          <div class="ch-field"><label>Case Issuer</label><input :value="caseDetails.caseIssuer" readonly class="field-readonly" /></div>
+          <div class="ch-field"><label>Case Issuer</label><input :value="caseIssuerName" readonly class="field-readonly" /></div>
 
           <!-- Closure Reason — editable as free text (no canonical list yet) -->
           <div class="ch-field">
@@ -2080,6 +2080,7 @@ const editForm = reactive({
   closure_dt:     '',
 })
 const savingEdit = ref(false)
+const caseIssuerName = ref('')
 
 // Mirror old project: auto-tick the RailPay prevent checkbox when the case
 // status is changed to Closed or a paid/payment status — matches the two
@@ -2156,6 +2157,7 @@ async function enterEditMode() {
   ])
   _populateCustomerForm()
   if (isPcnCase.value && hasVehicle.value) _populateVehicleForm()
+  router.replace({ query: { ...route.query, mode: 'edit' } })
   isEditMode.value = true
 }
 
@@ -2348,6 +2350,7 @@ async function saveEdit() {
 
     // 6. Re-hydrate every tab from the server.
     await loadCase()
+    router.replace({ query: { ...route.query, mode: undefined } })
     isEditMode.value = false
     Swal.fire({
       icon: 'success',
@@ -2369,6 +2372,7 @@ async function saveEdit() {
 // the old name can find the new location: see saveEdit() above.
 
 function cancelEdit() {
+  router.replace({ query: { ...route.query, mode: undefined } })
   isEditMode.value = false
   // Restore settlement display fields from the last saved row so that any
   // in-progress edits don't leak into view mode after cancel.
@@ -2953,6 +2957,21 @@ async function loadCase() {
     caseDetails.closureDate   = fmtDate(c.closure_dt)
     caseDetails.closureReason = c.closure_reason || ''
     caseDetails.caseIssuer    = c.case_issuer || ''
+
+    // Resolve issuer UUID to a display name.
+    if (c.case_issuer) {
+      try {
+        const issuers = await casesService.listIssuers()
+        const match = issuers.find(u => u.user_id === c.case_issuer)
+        caseIssuerName.value = match
+          ? (match.full_name && match.username ? `${match.full_name} (${match.username})` : match.full_name || match.username || c.case_issuer)
+          : c.case_issuer
+      } catch {
+        caseIssuerName.value = c.case_issuer
+      }
+    } else {
+      caseIssuerName.value = ''
+    }
 
     customerLinked.value = Boolean(c.customer_id)
     journeyLinked.value  = Boolean(c.journey_id)
@@ -3650,18 +3669,12 @@ const noteSaving    = ref(false)
 const noteError     = ref('')
 
 onMounted(async () => {
+  // Capture the initial mode before loadCase (which runs in view mode) so we
+  // can hand off to enterEditMode when the page is deep-linked with ?mode=edit.
+  const startInEdit = isEditMode.value
+  isEditMode.value = false
   await loadCase()
-  // When the page opens with ?mode=edit (e.g. deep-link from the case list),
-  // isEditMode is already true and enterEditMode() is never called.
-  // Seed dropdown options and form values here so every field comes up filled.
-  if (isEditMode.value) {
-    const opts = [ensureStatusOptions(), _ensureTitleOptions(), _ensureVerificationOptions(), _ensureReasonOptions()]
-    if (isPcnCase.value && hasVehicle.value) opts.push(_ensurePcnOptions())
-    await Promise.all(opts)
-    _populateCustomerForm()
-    if (_journeyRaw.value) { _populateJourneyForm(); ensureQuestionAtOptions(); _ensureRailCardTypeOptions() }
-    if (isPcnCase.value && hasVehicle.value) _populateVehicleForm()
-  }
+  if (startInEdit) await enterEditMode()
 })
 
 const tabs = computed(() => [
@@ -5540,6 +5553,7 @@ async function confirmLink() {
   border-radius: 6px;
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
   display: flex; flex-direction: column;
+  width: 560px; max-width: 90vw;
   max-height: 90vh; overflow-y: auto;
 }
 .modal-head {

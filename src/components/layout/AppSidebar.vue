@@ -6,62 +6,155 @@
     </div>
 
     <div class="sidebar-nav">
-      <template v-for="(section, sIdx) in navSections" :key="sIdx">
-        <div v-if="section.label" class="nav-section-label">{{ section.label }}</div>
+
+      <!-- Always visible -->
+      <ul class="nav-section">
+        <li>
+          <RouterLink to="/dashboard" class="nav-item" :class="{ active: $route.name === 'dashboard' }">
+            <span class="nav-icon" v-html="icons.home" aria-hidden="true"></span>
+            <span class="nav-text">Homepage</span>
+          </RouterLink>
+        </li>
+      </ul>
+      <div class="nav-divider"></div>
+
+      <!-- Revenue Protection — visible to RevpAdminUser and RevpAgentUser -->
+      <template v-if="isRevpUser">
+        <div class="nav-section-label">REVENUE PROTECTION</div>
         <ul class="nav-section">
-          <li v-for="item in section.items" :key="item.name">
+          <li>
+            <RouterLink to="/dashboard" class="nav-item" :class="{ active: $route.name === 'rp-dashboard' }">
+              <span class="nav-text">Dashboard</span>
+            </RouterLink>
+          </li>
+          <li>
+            <RouterLink to="/quick-case-search" class="nav-item" :class="{ active: $route.name === 'quick-case-search' }">
+              <span class="nav-text">Quick Case Search</span>
+            </RouterLink>
+          </li>
+          <li>
+            <RouterLink to="/add-new-case" class="nav-item" :class="{ active: $route.name === 'add-new-case' }">
+              <span class="nav-text">Add New Case</span>
+            </RouterLink>
+          </li>
+          <li>
+            <RouterLink to="/cases" class="nav-item" :class="{ active: $route.name === 'cases' }">
+              <span class="nav-text">Case List</span>
+            </RouterLink>
+          </li>
+          <!-- Intelligence Report — also requires IR Report History sub-role -->
+          <li v-if="hasIRRole">
+            <RouterLink to="/intelligence-report" class="nav-item" :class="{ active: $route.name === 'intelligence-report' }">
+              <span class="nav-text">Intelligence Report</span>
+            </RouterLink>
+          </li>
+          <li>
+            <RouterLink to="/payment-records" class="nav-item" :class="{ active: $route.name === 'payment-records' }">
+              <span class="nav-text">Payment Records</span>
+            </RouterLink>
+          </li>
+          <li>
+            <RouterLink to="/action-tracker" class="nav-item" :class="{ active: $route.name === 'action-tracker' }">
+              <span class="nav-text">Action Tracker</span>
+            </RouterLink>
+          </li>
+          <li>
+            <RouterLink to="/print-queue" class="nav-item" :class="{ active: $route.name === 'print-queue' }">
+              <span class="nav-text">Print Queue</span>
+            </RouterLink>
+          </li>
+          <li>
+            <RouterLink to="/address-search" class="nav-item" :class="{ active: $route.name === 'address-search' }">
+              <span class="nav-text">Perform Address Search</span>
+            </RouterLink>
+          </li>
+          <!-- Court Booking — RevpAdminUser only -->
+          <li v-if="isRevpAdmin">
+            <RouterLink to="/court-booking" class="nav-item" :class="{ active: $route.name === 'court-booking' }">
+              <span class="nav-text">Court Booking</span>
+            </RouterLink>
+          </li>
+
+          <!-- Revenue Protection Admin — RevpAdminUser only -->
+          <li v-if="isRevpAdmin">
             <button
-              v-if="item.children"
               class="nav-item"
-              :class="{ open: openGroups.includes(item.name), 'has-active': hasActiveChild(item) }"
-              @click="toggleGroup(item.name)"
-              :aria-expanded="openGroups.includes(item.name)"
+              :class="{ open: openGroups.includes('rpAdmin'), 'has-active': rpAdminChildActive }"
+              @click="toggleGroup('rpAdmin')"
+              :aria-expanded="openGroups.includes('rpAdmin')"
             >
-              <span v-if="item.icon" class="nav-icon" v-html="item.icon" aria-hidden="true"></span>
-              <span class="nav-text">{{ item.label }}</span>
+              <span class="nav-text">Revenue Protection Admin</span>
               <svg class="nav-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true">
                 <polyline points="6 9 12 15 18 9"/>
               </svg>
             </button>
-
-            <ul v-if="item.children && openGroups.includes(item.name)" class="nav-sub">
-              <li v-for="child in item.children" :key="child.name">
-                <RouterLink :to="child.to" class="nav-sub-item" :class="{ active: $route.name === child.name }">
-                  {{ child.label }}
-                </RouterLink>
-              </li>
+            <ul v-if="openGroups.includes('rpAdmin')" class="nav-sub">
+              <li><RouterLink to="/admin/action-template"      class="nav-sub-item" :class="{ active: $route.name === 'action-template' }">Action Template</RouterLink></li>
+              <li><RouterLink to="/admin/courts"               class="nav-sub-item" :class="{ active: $route.name === 'courts' }">Courts</RouterLink></li>
+              <li><RouterLink to="/admin/ticket-pads"          class="nav-sub-item" :class="{ active: $route.name === 'ticket-pads' }">Ticket Pads</RouterLink></li>
+              <li><RouterLink to="/admin/letter-templates"     class="nav-sub-item" :class="{ active: $route.name === 'letter-templates' }">Letter Templates</RouterLink></li>
+              <li><RouterLink to="/admin/email-templates"      class="nav-sub-item" :class="{ active: $route.name === 'email-templates' }">Email Templates</RouterLink></li>
+              <li><RouterLink to="/admin/print-templates"      class="nav-sub-item" :class="{ active: $route.name === 'print-templates' }">Print Templates</RouterLink></li>
+              <li><RouterLink to="/admin/manual-case-initials" class="nav-sub-item" :class="{ active: $route.name === 'manual-case-initials' }">Manual Case Initials</RouterLink></li>
+              <li><RouterLink to="/admin/offences"             class="nav-sub-item" :class="{ active: $route.name === 'offences' }">Offences</RouterLink></li>
+              <li><RouterLink to="/admin/charges"              class="nav-sub-item" :class="{ active: $route.name === 'admin-charges' }">Charges and Appeals</RouterLink></li>
+              <li><RouterLink to="/admin/casetype"             class="nav-sub-item" :class="{ active: $route.name === 'admin-casetype' }">Casetype Appeal Enabled</RouterLink></li>
+              <li><RouterLink to="/admin/zero-fare"            class="nav-sub-item" :class="{ active: $route.name === 'zero-fare' }">Zero Fare For App Control</RouterLink></li>
+              <li><RouterLink to="/admin/printer-app"          class="nav-sub-item" :class="{ active: $route.name === 'printer-app' }">Printer App Control</RouterLink></li>
+              <li><RouterLink to="/admin/intel-config"         class="nav-sub-item" :class="{ active: $route.name === 'intel-config' }">Intelligence Report Config</RouterLink></li>
+              <li><RouterLink to="/admin/auth-prosecutor"      class="nav-sub-item" :class="{ active: $route.name === 'auth-prosecutor' }">Authorising Prosecutor</RouterLink></li>
+              <li><RouterLink to="/admin/lookup-values"        class="nav-sub-item" :class="{ active: $route.name === 'lookup-values' }">Lookup Values</RouterLink></li>
+              <li><RouterLink to="/admin/address-log"          class="nav-sub-item" :class="{ active: $route.name === 'address-log' }">Address Search Log</RouterLink></li>
+              <li><RouterLink to="/admin/letter-vars"          class="nav-sub-item" :class="{ active: $route.name === 'letter-vars' }">Letter Variable Lookup</RouterLink></li>
+              <li><RouterLink to="/admin/station-mgmt"         class="nav-sub-item" :class="{ active: $route.name === 'station-mgmt' }">Station Management</RouterLink></li>
+              <li><RouterLink to="/admin/station-mgmt/service-type" class="nav-sub-item" :class="{ active: $route.name === 'service-type' }">Service Type Management</RouterLink></li>
+              <li><RouterLink to="/admin/car-park"             class="nav-sub-item" :class="{ active: $route.name === 'car-park' }">Car Park Locations</RouterLink></li>
+              <li><RouterLink to="/admin/remove-case"          class="nav-sub-item" :class="{ active: $route.name === 'remove-case' }">Remove Case Completely</RouterLink></li>
+              <li><RouterLink to="/admin/users"                class="nav-sub-item" :class="{ active: $route.name === 'users' }">Users</RouterLink></li>
             </ul>
-
-            <RouterLink
-              v-if="!item.children"
-              :to="item.to"
-              class="nav-item"
-              :class="{ active: $route.name === item.name }"
-            >
-              <span v-if="item.icon" class="nav-icon" v-html="item.icon" aria-hidden="true"></span>
-              <span class="nav-text">{{ item.label }}</span>
-            </RouterLink>
           </li>
         </ul>
-        <div v-if="section.divider" class="nav-divider"></div>
+        <div class="nav-divider"></div>
       </template>
+
+      <!-- Journey Finder — always visible -->
+      <ul class="nav-section">
+        <li>
+          <RouterLink to="/dashboard" class="nav-item" :class="{ active: $route.name === 'journey-finder' }">
+            <span class="nav-icon" v-html="icons.compass" aria-hidden="true"></span>
+            <span class="nav-text">Journey Finder</span>
+          </RouterLink>
+        </li>
+      </ul>
+
     </div>
   </aside>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRoute, RouterLink } from 'vue-router'
+import { useAuthStore } from '@/store/auth.js'
 
 const $route = useRoute()
+const auth = useAuthStore()
 const openGroups = ref(['rpAdmin'])
+
+const isRevpUser  = computed(() => auth.hasRole('RevpAdminUser') || auth.hasRole('RevpAgentUser'))
+const isRevpAdmin = computed(() => auth.hasRole('RevpAdminUser'))
+const hasIRRole   = computed(() => auth.hasRole('IR Report History'))
+
+const RP_ADMIN_ROUTES = [
+  'action-template', 'courts', 'ticket-pads', 'letter-templates', 'email-templates',
+  'print-templates', 'manual-case-initials', 'offences', 'admin-charges', 'admin-casetype',
+  'zero-fare', 'printer-app', 'intel-config', 'auth-prosecutor', 'lookup-values',
+  'address-log', 'letter-vars', 'station-mgmt', 'service-type', 'car-park', 'remove-case', 'users',
+]
+const rpAdminChildActive = computed(() => RP_ADMIN_ROUTES.includes($route.name))
 
 function toggleGroup(name) {
   const i = openGroups.value.indexOf(name)
   i === -1 ? openGroups.value.push(name) : openGroups.value.splice(i, 1)
-}
-function hasActiveChild(item) {
-  return item.children?.some(c => c.name === $route.name)
 }
 
 const icons = {
@@ -70,62 +163,7 @@ const icons = {
   users:   `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`
 }
 
-const navSections = [
-  {
-    items: [
-      { name: 'dashboard', label: 'Homepage', to: '/dashboard', icon: icons.home }
-    ],
-    divider: true
-  },
-  {
-    label: 'REVENUE PROTECTION',
-    items: [
-      { name: 'rp-dashboard',    label: 'Dashboard',              to: '/dashboard' },
-      { name: 'quick-case-search', label: 'Quick Case Search',      to: '/quick-case-search' },
-      { name: 'add-new-case',    label: 'Add New Case',           to: '/add-new-case' },
-      { name: 'cases',           label: 'Case List',              to: '/cases' },
-      { name: 'intelligence-report', label: 'Intelligence Report', to: '/intelligence-report' },
-      { name: 'payment-records', label: 'Payment Records',        to: '/payment-records' },
-      { name: 'action-tracker',  label: 'Action Tracker',         to: '/action-tracker' },
-      { name: 'print-queue',     label: 'Print Queue',            to: '/print-queue' },
-      { name: 'address-search',  label: 'Perform Address Search', to: '/address-search' },
-      { name: 'court-booking',   label: 'Court Booking',          to: '/court-booking' },
-      {
-        name: 'rpAdmin', label: 'Revenue Protection Admin',
-        children: [
-          { name: 'action-template',     label: 'Action Template',         to: '/admin/action-template' },
-          { name: 'courts',              label: 'Courts',                  to: '/admin/courts' },
-          { name: 'ticket-pads',         label: 'Ticket Pads',             to: '/admin/ticket-pads' },
-          { name: 'letter-templates',    label: 'Letter Templates',        to: '/admin/letter-templates' },
-          { name: 'email-templates',     label: 'Email Templates',         to: '/admin/email-templates' },
-          { name: 'print-templates',     label: 'Print Templates',         to: '/admin/print-templates' },
-          { name: 'manual-case-initials',label: 'Manual Case Initials',    to: '/admin/manual-case-initials' },
-          { name: 'offences',            label: 'Offences',                to: '/admin/offences' },
-          { name: 'admin-charges',       label: 'Charges and Appeals',     to: '/admin/charges' },
-          { name: 'admin-casetype',      label: 'Casetype Appeal Enabled', to: '/admin/casetype' },
-          { name: 'zero-fare',           label: 'Zero Fare For App Control', to: '/admin/zero-fare' },
-          { name: 'printer-app',         label: 'Printer App Control',     to: '/admin/printer-app' },
-          { name: 'intel-config',        label: 'Intelligence Report Config', to: '/admin/intel-config' },
-          { name: 'auth-prosecutor',     label: 'Authorising Prosecutor',  to: '/admin/auth-prosecutor' },
-          { name: 'lookup-values',       label: 'Lookup Values',           to: '/admin/lookup-values' },
-          { name: 'address-log',         label: 'Address Search Log',      to: '/admin/address-log' },
-          { name: 'letter-vars',         label: 'Letter Variable Lookup',  to: '/admin/letter-vars' },
-          { name: 'station-mgmt',        label: 'Station Management',      to: '/admin/station-mgmt' },
-          { name: 'service-type',        label: 'Service Type Management', to: '/admin/station-mgmt/service-type' },
-          { name: 'car-park',            label: 'Car Park Locations',      to: '/admin/car-park' },
-          { name: 'remove-case',         label: 'Remove Case Completely',  to: '/admin/remove-case' }
-        ]
-      }
-    ],
-    divider: true
-  },
-  {
-    items: [
-      { name: 'journey-finder',  label: 'Journey Finder',       to: '/dashboard', icon: icons.compass },
-      { name: 'users',           label: 'Users',                to: '/dashboard', icon: icons.users }
-    ]
-  }
-]
+
 </script>
 
 <style scoped>

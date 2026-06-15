@@ -104,12 +104,28 @@ export const useAuthStore = defineStore('auth', () => {
     ready.value = true
   }
 
-  function hasPermission(_permission) {
-    return isAuthenticated.value
+  // Maps abstract route permission names (meta.permission) to required roles.
+  // Any match in the array is sufficient (OR logic).
+  const PERMISSION_ROLES = {
+    dashboard: [],                              // any authenticated user
+    cases:     ['RevpAdminUser', 'RevpAgentUser'],
+    admin:     ['RevpAdminUser'],
+  }
+
+  function hasRole(roleName) {
+    return (user.value?.roles || []).some(r => r.name === roleName)
+  }
+
+  function hasPermission(permission) {
+    if (!isAuthenticated.value) return false
+    const required = PERMISSION_ROLES[permission]
+    if (!required || required.length === 0) return true
+    return required.some(r => hasRole(r))
   }
 
   return {
     accessToken, refreshToken, user, tocId, ready, isAuthenticated,
-    login, refresh, logout, fetchProfile, hydrate, resetSessionTimer, hasPermission,
+    login, refresh, logout, fetchProfile, hydrate, resetSessionTimer,
+    hasPermission, hasRole,
   }
 })

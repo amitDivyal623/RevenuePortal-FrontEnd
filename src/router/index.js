@@ -32,6 +32,7 @@ const AddNewCaseView       = () => import('@/views/AddNewCaseView.vue')
 const IntelligenceReportView = () => import('@/views/IntelligenceReportView.vue')
 const AddressSearchView    = () => import('@/views/AddressSearchView.vue')
 const CourtBookingView     = () => import('@/views/CourtBookingView.vue')
+const UsersView            = () => import('@/views/UsersView.vue')
 const CaseDetailsView      = () => import('@/views/CaseDetailsView.vue')
 const PlaceholderView      = () => import('@/views/PlaceholderView.vue')
 const NotFoundView         = () => import('@/views/NotFoundView.vue')
@@ -79,6 +80,7 @@ const routes = [
   { path: '/admin/station-mgmt/service-type', name: 'service-type',    component: ServiceTypeView,     meta: { title: 'Service Type Management', parent: stationParent, permission: 'admin' } },
   { path: '/admin/car-park',             name: 'car-park',             component: CarParkView,         meta: { title: 'Car Park Locations', parent: adminParent, permission: 'admin' } },
   { path: '/admin/remove-case',          name: 'remove-case',          component: RemoveCaseView,      meta: { title: 'Remove Case Completely', parent: adminParent, permission: 'admin' } },
+  { path: '/admin/users',               name: 'users',                component: UsersView,           meta: { title: 'Users', parent: adminParent, permission: 'admin' } },
 
   { path: '/403', name: 'forbidden', component: ForbiddenView, meta: { public: true, title: 'Access denied' } },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView, meta: { public: true, title: 'Not found' } }
