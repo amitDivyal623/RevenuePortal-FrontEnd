@@ -717,6 +717,7 @@ async function loadRows() {
     dateTo:         shiftDateToEndOfDay(applied.dateTo),
     dateSearchBy:   applied.dateSearchBy,
     ordering:       ordering.value,
+    fullyPaid:      applied.fullyPaid,
   })
   if (currentPage.value > totalPages.value) {
     currentPage.value = totalPages.value

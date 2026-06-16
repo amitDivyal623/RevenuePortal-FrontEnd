@@ -96,12 +96,14 @@ function _buildListParams(filters) {
     dateTo = '',
     dateSearchBy = 'case_dt',
     ordering = '-case_dt',
+    fullyPaid = false,
   } = filters
   const params = new URLSearchParams()
   params.set('page',      String(page))
   params.set('page_size', String(pageSize))
   if (ordering)     params.set('ordering',       ordering)
   if (dateSearchBy) params.set('date_search_by', dateSearchBy)
+  if (fullyPaid)    params.set('fully_paid',     '1')
   const add = (k, v) => {
     const s = (v ?? '').toString().trim()
     if (s) params.set(k, s)
