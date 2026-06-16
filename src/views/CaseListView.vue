@@ -18,6 +18,9 @@
         <strong class="ch-heading">CASE LIST FILTERS</strong>
       </div>
 
+      <!-- Quick-access chips for recently used presets -->
+      <FilterPresetChips @apply="applyPreset" />
+
       <div class="case-list-filters">
         <!-- Column 1: identity + classification -->
         <div class="filter-col">
@@ -130,8 +133,11 @@
       </div>
 
       <div class="filter-actions">
-        <button class="btn-action-green" :disabled="loading" @click="applyFilter">SEARCH</button>
-        <button class="btn-action-red"   :disabled="loading" @click="resetFilter">RESET</button>
+        <FilterPresetPopover :current-filters="filters" @apply="applyPreset" />
+        <div class="filter-actions-right">
+          <button class="btn-action-green" :disabled="loading" @click="applyFilter">SEARCH</button>
+          <button class="btn-action-red"   :disabled="loading" @click="resetFilter">RESET</button>
+        </div>
       </div>
     </div>
 
@@ -552,6 +558,8 @@ import { ref, computed, reactive, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import FilterPresetPopover from '@/components/FilterPresetPopover.vue'
+import FilterPresetChips from '@/components/FilterPresetChips.vue'
 import { sanitizeString } from '@/utils/security.js'
 import { useCasesStore } from '@/store/cases.store.js'
 import { courtsService } from '@/services/courts.service.js'
@@ -758,6 +766,12 @@ function resetFilter() {
   currentPage.value = 1
   selectedIds.value = new Set()
   loadRows()
+}
+function applyPreset(presetFilters) {
+  // Merge preset values over a fresh baseline so fields absent from the
+  // preset revert to their empty defaults rather than keeping stale values.
+  Object.assign(filters, emptyFilters(), presetFilters)
+  applyFilter()
 }
 function changePage(p) {
   if (p < 1 || p > totalPages.value || p === currentPage.value) return
@@ -1329,9 +1343,14 @@ onMounted(() => {
 }
 .filter-actions {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
   gap: 10px;
   margin-top: 8px;
+}
+.filter-actions-right {
+  display: flex;
+  gap: 10px;
 }
 
 .action-toolbar {

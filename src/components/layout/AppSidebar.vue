@@ -119,7 +119,6 @@
               <!-- Admin-only items continued -->
               <template v-if="isRevpAdmin">
                 <li><RouterLink to="/admin/remove-case"          class="nav-sub-item" :class="{ active: $route.name === 'remove-case' }">Remove Case Completely</RouterLink></li>
-                <li><RouterLink to="/admin/users"                class="nav-sub-item" :class="{ active: $route.name === 'users' }">Users</RouterLink></li>
               </template>
             </ul>
           </li>
@@ -133,6 +132,12 @@
           <RouterLink to="/dashboard" class="nav-item" :class="{ active: $route.name === 'journey-finder' }">
             <span class="nav-icon" v-html="icons.compass" aria-hidden="true"></span>
             <span class="nav-text">Journey Finder</span>
+          </RouterLink>
+        </li>
+        <li v-if="isRevpAdmin">
+          <RouterLink to="/admin/users" class="nav-item" :class="{ active: $route.name === 'users' }">
+            <span class="nav-icon" v-html="icons.users" aria-hidden="true"></span>
+            <span class="nav-text">Users</span>
           </RouterLink>
         </li>
       </ul>
@@ -159,7 +164,7 @@ const RP_ADMIN_ROUTES = [
   'action-template', 'courts', 'ticket-pads', 'letter-templates', 'email-templates',
   'print-templates', 'manual-case-initials', 'offences', 'admin-charges', 'admin-casetype',
   'zero-fare', 'printer-app', 'intel-config', 'auth-prosecutor', 'lookup-values',
-  'address-log', 'letter-vars', 'station-mgmt', 'service-type', 'car-park', 'remove-case', 'users',
+  'address-log', 'letter-vars', 'station-mgmt', 'service-type', 'car-park', 'remove-case',
 ]
 const rpAdminChildActive = computed(() => RP_ADMIN_ROUTES.includes($route.name))
 
