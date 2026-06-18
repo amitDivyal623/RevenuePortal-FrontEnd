@@ -73,6 +73,9 @@ export const casesService = {
       `/revp/cases/${encodeURIComponent(caseId)}/audit/export/`,
       `audit_${String(caseId).substring(0, 8)}.xlsx`,
     ),
+
+  // ── MG11 Q&A  (getMG11datatable) ─────────────────────────────────────────
+  listQa: (id) => api.get(`/revp/cases/${encodeURIComponent(id)}/qa/`),
 }
 
 // Private helper — turns the filter args object into the query string the

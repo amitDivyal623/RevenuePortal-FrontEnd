@@ -120,9 +120,21 @@ async function handleSubmit() {
       username: sanitizeString(form.username),
       password: form.password,
     })
-    const redirect = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
-      ? route.query.redirect : '/dashboard'
-    router.push(redirect)
+    // Determine where to send the user after login:
+    // 1. If there is a ?redirect= path AND the user has permission for it → honour it.
+    // 2. Otherwise → first route this user's roles actually allow.
+    const requestedPath = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
+      ? route.query.redirect
+      : null
+    let destination = auth.defaultLandingRoute()
+    if (requestedPath) {
+      const resolved = router.resolve(requestedPath)
+      const perm = resolved?.meta?.permission
+      if (!perm || auth.hasPermission(perm)) {
+        destination = requestedPath
+      }
+    }
+    router.push(destination)
   } catch (err) {
     showApiError(err)
     form.password = ''

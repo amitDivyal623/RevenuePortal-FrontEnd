@@ -54,9 +54,9 @@ const routes = [
   { path: '/print-queue',        name: 'print-queue',        component: PrintQueueView,        meta: { title: 'Print Queue', permission: 'cases' } },
   { path: '/quick-case-search',  name: 'quick-case-search',  component: QuickCaseSearchView,   meta: { title: 'Quick Case Search', permission: 'cases' } },
   { path: '/add-new-case',       name: 'add-new-case',       component: AddNewCaseView,        meta: { title: 'Add New Case', permission: 'cases' } },
-  { path: '/intelligence-report',name: 'intelligence-report',component: IntelligenceReportView,meta: { title: 'Intelligence Report', permission: 'cases' } },
+  { path: '/intelligence-report',name: 'intelligence-report',component: IntelligenceReportView,meta: { title: 'Intelligence Report', permission: ['cases', 'ir'] } },
   { path: '/address-search',     name: 'address-search',     component: AddressSearchView,     meta: { title: 'Perform Address Search', permission: 'cases' } },
-  { path: '/court-booking',      name: 'court-booking',      component: CourtBookingView,      meta: { title: 'Court Booking', permission: 'cases' } },
+  { path: '/court-booking',      name: 'court-booking',      component: CourtBookingView,      meta: { title: 'Court Booking', permission: 'admin' } },
 
   // Revenue Protection Admin
   { path: '/admin/action-template',      name: 'action-template',      component: ActionTemplateView,  meta: { title: 'Action Template', parent: adminParent, permission: 'admin' } },
@@ -76,9 +76,9 @@ const routes = [
   { path: '/admin/lookup-values',        name: 'lookup-values',        component: LookupValuesView,    meta: { title: 'Lookup Values', parent: adminParent, permission: 'admin' } },
   { path: '/admin/address-log',          name: 'address-log',          component: AddressLogView,      meta: { title: 'Address Search Log', parent: adminParent, permission: 'admin' } },
   { path: '/admin/letter-vars',          name: 'letter-vars',          component: LetterVariableView,  meta: { title: 'Letter Variable Lookup', parent: adminParent, permission: 'admin' } },
-  { path: '/admin/station-mgmt',         name: 'station-mgmt',         component: StationMgmtView,     meta: { title: 'Station Management', parent: adminParent, permission: 'admin' } },
-  { path: '/admin/station-mgmt/service-type', name: 'service-type',    component: ServiceTypeView,     meta: { title: 'Service Type Management', parent: stationParent, permission: 'admin' } },
-  { path: '/admin/car-park',             name: 'car-park',             component: CarParkView,         meta: { title: 'Car Park Locations', parent: adminParent, permission: 'admin' } },
+  { path: '/admin/station-mgmt',         name: 'station-mgmt',         component: StationMgmtView,     meta: { title: 'Station Management', parent: adminParent, permission: 'station' } },
+  { path: '/admin/station-mgmt/service-type', name: 'service-type',    component: ServiceTypeView,     meta: { title: 'Service Type Management', parent: stationParent, permission: 'station' } },
+  { path: '/admin/car-park',             name: 'car-park',             component: CarParkView,         meta: { title: 'Car Park Locations', parent: adminParent, permission: 'station' } },
   { path: '/admin/remove-case',          name: 'remove-case',          component: RemoveCaseView,      meta: { title: 'Remove Case Completely', parent: adminParent, permission: 'admin' } },
   { path: '/admin/users',               name: 'users',                component: UsersView,           meta: { title: 'Users', parent: adminParent, permission: 'admin' } },
 
@@ -106,8 +106,13 @@ router.beforeEach(async (to) => {
     return { name: 'login', query: { redirect: to.fullPath } }
   }
 
-  // Permission check — redirect to /403 if the user lacks the required permission
-  if (to.meta.permission && !auth.hasPermission(to.meta.permission)) {
+  // Permission check — meta.permission can be a string (single check) or an
+  // array of strings (all must pass — AND logic, used for routes that require
+  // a primary role AND an auxiliary role, e.g. Intelligence Report).
+  const perms = to.meta.permission
+    ? (Array.isArray(to.meta.permission) ? to.meta.permission : [to.meta.permission])
+    : []
+  if (perms.some(p => !auth.hasPermission(p))) {
     return { name: 'forbidden' }
   }
 

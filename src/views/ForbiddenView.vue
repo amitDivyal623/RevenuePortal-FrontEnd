@@ -4,13 +4,18 @@
       <div class="error-code">403</div>
       <h1 class="error-title">Access denied</h1>
       <p class="error-desc">You don't have permission to access this page. Contact your administrator.</p>
-      <RouterLink to="/dashboard" class="btn btn-primary">← Back to dashboard</RouterLink>
+      <RouterLink :to="landingRoute" class="btn btn-primary">← Go to my home page</RouterLink>
     </div>
   </div>
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
+import { useAuthStore } from '@/store/auth.js'
+
+const auth = useAuthStore()
+const landingRoute = computed(() => auth.defaultLandingRoute())
 </script>
 
 <style scoped>

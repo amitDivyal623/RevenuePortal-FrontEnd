@@ -28,6 +28,20 @@ export const useAuthStore = defineStore('auth', () => {
     if (refresh !== undefined) persistRefresh(refresh || null)
     const claims = decodeJwt(access)
     if (claims?.toc_id) tocId.value = claims.toc_id
+    // Bootstrap roles from the JWT immediately so routing and nav decisions
+    // don't have to wait for the async fetchProfile() call to complete.
+    // fetchProfile() still runs to enrich display fields (name, email, initials).
+    if (claims?.user_id) {
+      const jwtRoles = Array.isArray(claims.roles)
+        ? claims.roles.map(name => ({ name }))
+        : []
+      if (!user.value) {
+        user.value = { user_id: claims.user_id, roles: jwtRoles }
+      } else {
+        user.value.user_id = claims.user_id
+        user.value.roles   = jwtRoles
+      }
+    }
   }
 
   function resetSessionTimer() {
@@ -107,9 +121,11 @@ export const useAuthStore = defineStore('auth', () => {
   // Maps abstract route permission names (meta.permission) to required roles.
   // Any match in the array is sufficient (OR logic).
   const PERMISSION_ROLES = {
-    dashboard: [],                              // any authenticated user
+    dashboard: [],                                                       // any authenticated user
     cases:     ['RevpAdminUser', 'RevpAgentUser'],
     admin:     ['RevpAdminUser'],
+    station:   ['RevpAdminUser', 'RP Station Config'],                   // station mgmt + car park
+    ir:        ['IR Report History'],                                      // intelligence reports — requires primary role via 'cases' too
   }
 
   function hasRole(roleName) {
@@ -123,9 +139,19 @@ export const useAuthStore = defineStore('auth', () => {
     return required.some(r => hasRole(r))
   }
 
+  // Returns the first route path this user can actually access.
+  // Priority mirrors the old ColdFusion post-login routing:
+  //   Agent/Admin → Case List → (admin sub-pages) → Dashboard
+  function defaultLandingRoute() {
+    if (hasPermission('cases'))   return '/cases'
+    if (hasPermission('admin'))   return '/admin/courts'
+    if (hasPermission('station')) return '/admin/station-mgmt'
+    return '/dashboard'
+  }
+
   return {
     accessToken, refreshToken, user, tocId, ready, isAuthenticated,
     login, refresh, logout, fetchProfile, hydrate, resetSessionTimer,
-    hasPermission, hasRole,
+    hasPermission, hasRole, defaultLandingRoute,
   }
 })

@@ -1406,6 +1406,71 @@
         </div>
       </div>
 
+      <!-- MG11 Q&A -->
+      <div v-show="activeTab === 'mg11'">
+        <div v-if="mg11Error" class="error-banner" style="margin:0 0 12px 0;padding:8px 12px;background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:4px;font-size:0.875rem">
+          {{ mg11Error }}
+        </div>
+        <!-- Caution summary strip — read-only display or in-place edit when isEditMode -->
+        <div style="display:flex;align-items:center;gap:24px;flex-wrap:wrap;padding:10px 14px;margin-bottom:14px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:4px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:0.8125rem;color:#374151;font-weight:500;">Been Cautioned</span>
+            <select v-if="isEditMode" v-model="editForm.is_cautioned" class="field-editable">
+              <option value="">— Select —</option>
+              <option value="YES">YES</option>
+              <option value="NO">NO</option>
+            </select>
+            <span v-else style="padding:3px 14px;background:#fff;border:1px solid #d1d5db;border-radius:3px;font-size:0.8125rem;font-weight:600;">
+              {{ _caseRow?.is_cautioned === 'YES' ? 'YES' : 'NO' }}
+            </span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:0.8125rem;color:#374151;font-weight:500;">Understands The Caution</span>
+            <select v-if="isEditMode" v-model="editForm.is_caution_understood" class="field-editable">
+              <option value="">— Select —</option>
+              <option value="1">YES</option>
+              <option value="0">NO</option>
+            </select>
+            <span v-else style="padding:3px 14px;background:#fff;border:1px solid #d1d5db;border-radius:3px;font-size:0.8125rem;font-weight:600;">
+              {{ _caseRow?.is_caution_understood === '1' ? 'YES' : 'NO' }}
+            </span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:0.8125rem;color:#374151;font-weight:500;">Caution Date</span>
+            <input v-if="isEditMode" type="date" v-model="editForm.caution_date_time" class="field-editable" />
+            <span v-else style="padding:3px 14px;background:#fff;border:1px solid #d1d5db;border-radius:3px;font-size:0.8125rem;">
+              {{ fmtDate(_caseRow?.caution_date_time) || '—' }}
+            </span>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:60px">No.</th>
+                <th style="width:40%">Question</th>
+                <th>Answer</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-if="mg11Loading">
+                <td colspan="3" style="text-align:center;padding:20px;color:#6b7280">Loading…</td>
+              </tr>
+              <tr v-else-if="mg11Rows.length === 0">
+                <td colspan="3">
+                  <div class="empty-state"><p class="empty-state-desc">No Q&amp;A entries recorded for this case.</p></div>
+                </td>
+              </tr>
+              <tr v-for="row in mg11Rows" :key="row.id">
+                <td style="text-align:center">{{ row.question_no ?? '—' }}</td>
+                <td style="white-space:pre-wrap">{{ row.question || '—' }}</td>
+                <td style="white-space:pre-wrap">{{ row.answer || '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <!-- LINKED CASES -->
       <div v-show="activeTab === 'linked'">
         <div v-if="linkedTabHint"
@@ -1416,8 +1481,8 @@
         </div>
         <div class="flex gap-sm" style="margin-bottom: 12px">
           <button class="btn-action-green" @click="linkAdditionalCase">LINK ADDITIONAL CASE</button>
-          <button class="btn-action-light" @click="unlinkSelectedCase">UNLINK SELECTED CASE</button>
-          <button class="btn-action-light" @click="openSelectedLinkedCase">OPEN SELECTED CASE</button>
+          <button class="btn-action-light" :disabled="selectedLinkedIds.size !== 1" @click="unlinkSelectedCase">UNLINK SELECTED CASE</button>
+          <button class="btn-action-light" :disabled="selectedLinkedIds.size !== 1" @click="openSelectedLinkedCase">OPEN SELECTED CASE</button>
         </div>
         <div class="toolbar">
           <div class="flex items-center gap-sm">
@@ -2124,6 +2189,10 @@ const activeTab = ref('actions')
 let _lettersLoadedOnce = false
 let _emailsLoadedOnce  = false
 let _appealsLoadedOnce = false
+let _mg11LoadedOnce    = false
+const mg11Rows    = ref([])
+const mg11Loading = ref(false)
+const mg11Error   = ref('')
 watch(activeTab, async (tab) => {
   if (tab === 'letters' && !_lettersLoadedOnce) {
     _lettersLoadedOnce = true
@@ -2137,6 +2206,10 @@ watch(activeTab, async (tab) => {
     _appealsLoadedOnce = true
     await _loadAppeals(route.params.caseid)
   }
+  if (tab === 'mg11' && !_mg11LoadedOnce) {
+    _mg11LoadedOnce = true
+    await loadMg11Qa()
+  }
 })
 
 // Edit state — starts true when the route was opened with ?mode=edit
@@ -2148,10 +2221,13 @@ const isEditMode = ref(route.query.mode === 'edit')
 // caseDetails when the operator enters edit mode; written to the backend
 // in saveEdit(); discarded by cancelEdit().
 const editForm = reactive({
-  case_dt:        '',   // ISO yyyy-mm-dd
-  case_status_id: '',
-  closure_reason: '',
-  closure_dt:     '',
+  case_dt:               '',   // ISO yyyy-mm-dd
+  case_status_id:        '',
+  closure_reason:        '',
+  closure_dt:            '',
+  is_cautioned:          '',   // 'YES' | 'NO' | ''
+  is_caution_understood: '',   // '1' | '0' | ''
+  caution_date_time:     '',   // ISO yyyy-mm-dd
 })
 const savingEdit = ref(false)
 const caseIssuerName = ref('')
@@ -2194,10 +2270,13 @@ async function enterEditMode() {
   // Snapshot the current header values + customer values into the edit
   // buffers so every field comes up prefilled. The user cancels by hitting
   // CANCEL; nothing displayed is mutated until a save handler runs.
-  editForm.case_dt        = _toIsoDate(_caseRow.value?.case_dt)
-  editForm.case_status_id = _caseRow.value?.case_status_id || ''
-  editForm.closure_reason = _caseRow.value?.closure_reason || ''
-  editForm.closure_dt     = _toIsoDate(_caseRow.value?.closure_dt)
+  editForm.case_dt               = _toIsoDate(_caseRow.value?.case_dt)
+  editForm.case_status_id        = _caseRow.value?.case_status_id || ''
+  editForm.closure_reason        = _caseRow.value?.closure_reason || ''
+  editForm.closure_dt            = _toIsoDate(_caseRow.value?.closure_dt)
+  editForm.is_cautioned          = _caseRow.value?.is_cautioned          || ''
+  editForm.is_caution_understood = _caseRow.value?.is_caution_understood || ''
+  editForm.caution_date_time     = _toIsoDate(_caseRow.value?.caution_date_time)
   if (_journeyRaw.value) {
     _populateJourneyForm()
     ensureQuestionAtOptions()
@@ -2248,8 +2327,11 @@ async function saveEdit() {
     const headerPayload = {}
     if (editForm.case_dt)        headerPayload.case_dt        = editForm.case_dt
     if (editForm.case_status_id) headerPayload.case_status_id = editForm.case_status_id
-    headerPayload.closure_reason = editForm.closure_reason || ''
-    headerPayload.closure_dt     = editForm.closure_dt || ''
+    headerPayload.closure_reason         = editForm.closure_reason || ''
+    headerPayload.closure_dt             = editForm.closure_dt || ''
+    headerPayload.is_cautioned           = editForm.is_cautioned          || null
+    headerPayload.is_caution_understood  = editForm.is_caution_understood || null
+    headerPayload.caution_date_time      = editForm.caution_date_time     || null
 
     // Court / Summons Details — all stored on revp_case.
     headerPayload.court_id          = courtForm.court_id         || null
@@ -3398,6 +3480,7 @@ const isPcnCase = computed(() => {
   const code = (caseDetails.caseType || '').toUpperCase()
   return code === 'PCN' || code.includes('CAR PARK')
 })
+const isMg11Case = computed(() => (caseDetails.caseType || '').toUpperCase() === 'MG11')
 
 const court = reactive({
   court: '', courtBooking: '', courtReference: '',
@@ -3753,6 +3836,16 @@ onMounted(async () => {
   if (startInEdit) await enterEditMode()
 })
 
+// When navigating from one case to another (e.g. opening a linked case),
+// Vue Router reuses this component instance so onMounted does not fire again.
+// This watcher re-initialises the page for the new case in view mode.
+watch(() => route.params.caseid, async (newId, oldId) => {
+  if (!newId || newId === oldId) return
+  isEditMode.value = false
+  activeTab.value = 'actions'
+  await loadCase()
+})
+
 const tabs = computed(() => [
   { id: 'actions',     label: 'ACTIONS' },
   { id: 'customer',    label: 'CUSTOMER DETAILS' },
@@ -3766,6 +3859,7 @@ const tabs = computed(() => [
   { id: 'audit',       label: 'AUDIT' },
   ...(customerForm.email ? [{ id: 'email', label: 'EMAIL' }] : []),
   { id: 'letters',     label: `LETTERS (${letterRows.value.length})` },
+  ...(isMg11Case.value ? [{ id: 'mg11', label: `MG11 Q&A (${mg11Rows.value.length})` }] : []),
   { id: 'linked',      label: `LINKED CASES (${linkedCases.value.length})` }
 ])
 
@@ -5067,6 +5161,22 @@ function letterStatusColor(name) {
   if (u === 'IN_PRINT_QUEUE') return 'info'
   if (u === 'CANCELLED')      return 'danger'
   return 'neutral'
+}
+
+async function loadMg11Qa() {
+  const caseId = route.params.caseid
+  if (!caseId) return
+  mg11Loading.value = true
+  mg11Error.value = ''
+  try {
+    mg11Rows.value = await casesService.listQa(caseId) || []
+  } catch (e) {
+    console.error('[case-mg11] qa list failed', e)
+    mg11Error.value = e?.data?.detail || e?.message || 'Failed to load MG11 Q&A.'
+    mg11Rows.value = []
+  } finally {
+    mg11Loading.value = false
+  }
 }
 
 async function loadCaseLetters() {

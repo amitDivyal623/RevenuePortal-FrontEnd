@@ -174,9 +174,12 @@ import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { useDashboardStore } from '@/store/dashboard.store.js'
+import { useAuthStore } from '@/store/auth.js'
 
 const router = useRouter()
 const dashStore = useDashboardStore()
+const auth = useAuthStore()
+const hasCasesAccess = auth.hasPermission('cases')
 const { prosecution, recentCases, actionSummary, caseTypeWise,
         initialLoading, caseTypeWiseLoading, error } = storeToRefs(dashStore)
 
@@ -245,6 +248,10 @@ function openCase(caseId) {
 }
 
 onMounted(() => {
+  if (!hasCasesAccess) {
+    router.replace(auth.defaultLandingRoute())
+    return
+  }
   dashStore.fetchAll()
 })
 </script>
