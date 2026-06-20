@@ -92,6 +92,7 @@
           <button class="btn btn-primary" :disabled="selectedCount === 0 || busy" @click="openCourtModal">ASSIGN COURT BOOKINGS</button>
           <button class="btn btn-primary" :disabled="selectedCount === 0 || busy" @click="openLetterModal">CREATE LETTER</button>
           <button class="btn btn-primary" :disabled="selectedCount === 0 || busy" @click="onPrintLabel">PRINT LABEL</button>
+          <button class="btn btn-primary" :disabled="selectedCount === 0 || busy" @click="enterCourtResults">ENTER COURT RESULTS</button>
           <button class="btn btn-primary" @click="onExport">EXPORT ACTION TRACKER LIST</button>
         </div>
       </fieldset>
@@ -280,6 +281,62 @@
           <button class="btn btn-primary" @click="submitLetter"
                   :disabled="!letterModal.templateId || letterModal.saving">
             {{ letterModal.saving ? 'Queuing…' : 'Queue letter' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ENTER COURT RESULTS modal — same shape as Case List version.
+         Groups eligible cases (status='Court Booked') by court; operator
+         enters fine/costs/surcharge/compensation per case; one POST commits
+         all rows in a single transaction. -->
+    <div v-if="courtResultModal.open" class="modal-backdrop" @click.self="closeCourtResultModal">
+      <div class="modal-panel" style="width:780px;max-width:92vw">
+        <div class="modal-head">
+          <h3 class="modal-title">Enter Court Results</h3>
+          <button class="modal-close" @click="closeCourtResultModal" :disabled="courtResultModal.saving">×</button>
+        </div>
+        <div class="modal-body" style="max-height:65vh;overflow:auto">
+          <p v-if="courtResultModal.loading" class="text-light">Loading eligible cases…</p>
+          <p v-else-if="courtResultModal.groups.length === 0" class="text-light">
+            None of the selected cases is in the "Court Booked" status.
+            Result entry is only available once a case has been heard.
+          </p>
+          <div v-for="g in courtResultModal.groups" :key="g.court_id" class="court-result-group">
+            <div class="court-result-group-head">
+              {{ g.court_name || g.court_id }}
+              ({{ g.cases.length }} case<span v-if="g.cases.length !== 1">s</span>)
+            </div>
+            <table class="court-result-table">
+              <thead>
+                <tr>
+                  <th>Case</th>
+                  <th>Fine (£)</th>
+                  <th>Costs (£)</th>
+                  <th>Victim Surcharge (£)</th>
+                  <th>Compensation (£)</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="c in g.cases" :key="c.case_id">
+                  <td>{{ c.case_num }}</td>
+                  <td><input v-model.number="c.fine"         type="number" step="0.01" min="0" /></td>
+                  <td><input v-model.number="c.costs"        type="number" step="0.01" min="0" /></td>
+                  <td><input v-model.number="c.surcharge"    type="number" step="0.01" min="0" /></td>
+                  <td><input v-model.number="c.compensation" type="number" step="0.01" min="0" /></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-if="courtResultModal.error" class="error-banner" style="margin-top:8px">
+            {{ courtResultModal.error }}
+          </div>
+        </div>
+        <div class="modal-foot">
+          <button class="btn btn-secondary" @click="closeCourtResultModal" :disabled="courtResultModal.saving">Cancel</button>
+          <button class="btn btn-primary"   @click="submitCourtResult"
+                  :disabled="courtResultModal.saving || courtResultModal.groups.length === 0">
+            {{ courtResultModal.saving ? 'Saving…' : 'Save results' }}
           </button>
         </div>
       </div>
@@ -604,6 +661,85 @@ async function submitLetter() {
     letterModalError.value = e?.message || 'Letter queue failed.'
   } finally {
     letterModal.saving = false
+  }
+}
+
+// ── ENTER COURT RESULTS ─────────────────────────────────────────────────
+// Same flow as Case List: GET /revp/cases/court-result-options/ returns
+// the subset of selected cases that are in Court Booked status, grouped
+// by court. Operator fills in the money fields, POST /revp/cases/court-results/
+// commits them in one transaction. Backend already exists.
+const courtResultModal = reactive({
+  open: false, loading: false, saving: false, error: '', groups: [],
+})
+
+async function enterCourtResults() {
+  // Dedup case IDs the same way letter / print-label do — multiple actions
+  // can belong to the same case.
+  const caseIds = [...new Set([...selectedCaseIds.values()].filter(Boolean))]
+  if (caseIds.length === 0) return
+
+  courtResultModal.open    = true
+  courtResultModal.loading = true
+  courtResultModal.error   = ''
+  courtResultModal.groups  = []
+  try {
+    const { api } = await import('@/services/api.js')
+    const data = await api.get(
+      `/revp/cases/court-result-options/?case_ids=${encodeURIComponent(caseIds.join(','))}`
+    )
+    // Group shape: { court_id, court_name, cases: [{case_id, case_num}] }
+    // Pre-fill the money fields with 0 so v-model.number has something to bind.
+    courtResultModal.groups = (Array.isArray(data) ? data : []).map(g => ({
+      ...g,
+      cases: (g.cases || []).map(c => ({
+        ...c,
+        fine:         0,
+        costs:        0,
+        surcharge:    0,
+        compensation: 0,
+      })),
+    }))
+  } catch (e) {
+    console.error('[court-result] options failed', e)
+    courtResultModal.error = e?.data?.detail || e?.message || 'Failed to load eligible cases.'
+  } finally {
+    courtResultModal.loading = false
+  }
+}
+
+function closeCourtResultModal() {
+  if (courtResultModal.saving) return
+  courtResultModal.open = false
+}
+
+async function submitCourtResult() {
+  const results = []
+  courtResultModal.groups.forEach(g => g.cases.forEach(c => {
+    results.push({
+      case_id:           c.case_id,
+      court_fine:        Number(c.fine         || 0),
+      court_costs:       Number(c.costs        || 0),
+      victim_surcharge:  Number(c.surcharge    || 0),
+      court_restitution: Number(c.compensation || 0),
+    })
+  }))
+  if (!results.length) return
+
+  courtResultModal.saving = true
+  courtResultModal.error  = ''
+  try {
+    const { api } = await import('@/services/api.js')
+    const res = await api.post('/revp/cases/court-results/', { results })
+    window.alert(`Saved court results for ${res?.updated ?? 0} case(s)`)
+    courtResultModal.open = false
+    clearSelection()
+    await fetchPage()
+  } catch (e) {
+    console.error('[court-result] save failed', e)
+    courtResultModal.error = e?.data?.detail || e?.message || 'Save failed.'
+  } finally {
+    courtResultModal.saving = false
   }
 }
 
@@ -950,5 +1086,34 @@ onMounted(async () => {
   margin: 4px 0 0;
   padding-left: 18px;
   font-size: 0.85em;
+}
+
+/* ENTER COURT RESULTS modal — grouped table per court */
+.court-result-group {
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.court-result-group-head {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.court-result-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.court-result-table th,
+.court-result-table td {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 6px 8px;
+  text-align: left;
+}
+.court-result-table input {
+  width: 90px;
+  padding: 4px 6px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
 }
 </style>
